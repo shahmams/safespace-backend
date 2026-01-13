@@ -1,4 +1,6 @@
 // Import packages
+const db = require("./db");
+
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -80,5 +82,13 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+app.get("/db-test", async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT 1");
+    res.json({ message: "Database connected" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
