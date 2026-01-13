@@ -158,8 +158,6 @@ Complaint:
   if (!match) throw new Error("Invalid Gemini response");
 
   return JSON.parse(match[0]);
-  console.log("Gemini raw response:", responseText);
-
 }
 
 // -------------------------------
@@ -213,55 +211,72 @@ app.post("/report", async (req, res) => {
     });
   }
 
-  // 🔹 Spam detection
-  const spamStatus = classifySpam(report_text);
-  if (spamStatus === "spam") {
-    return res.status(400).json({
-      message: "Spam detected. Report rejected.",
-    });
-  }
-
-  // 🔹 Gemini analysis (safe)
-  let category = "Unknown";
-  let severity = "LOW";
-  let location = "Unknown";
-
-  try {
-    const geminiResult = await analyzeWithGemini(report_text);
-    const validated = validateGeminiOutput(geminiResult);
-
-    category = validated.category;
-    severity = validated.severity;
-    location = validated.location;
-  } catch (err) {
-    console.error("Gemini failed:", err.message);
-  }
-
-  // 🔹 Generate case ID
+  // 🔹 Generate case ID FIRST (always)
   const caseId = "C-" + Math.floor(100000 + Math.random() * 900000);
 
   try {
+    // 🔹 STEP 1: Insert report immediately (guaranteed storage)
     await db.query(
       `INSERT INTO reports 
-       (case_id, report_text, category, severity, location,
-        support_requested, support_status) 
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (case_id, report_text, support_requested, support_status)
+       VALUES (?, ?, ?, ?)`,
       [
         caseId,
         report_text,
-        category,
-        severity,
-        location,
         support_requested || false,
         support_requested ? "PENDING" : "NOT_REQUESTED",
       ]
     );
 
+    // 🔹 STEP 2: Spam detection AFTER storing
+    const spamStatus = classifySpam(report_text);
+
+    if (spamStatus === "spam") {
+      await db.query(
+        `UPDATE reports 
+         SET is_spam = true, category = 'SPAM', severity = 'IGNORED'
+         WHERE case_id = ?`,
+        [caseId]
+      );
+
+      return res.json({
+        message: "Report submitted successfully",
+        case_id: caseId,
+      });
+    }
+
+    // 🔹 STEP 3: Gemini analysis ONLY for non-spam
+    let category = "Unknown";
+    let severity = "LOW";
+    let location = "Unknown";
+
+    try {
+      const geminiResult = await analyzeWithGemini(report_text);
+      const validated = validateGeminiOutput(geminiResult);
+
+      category = validated.category;
+      severity = validated.severity;
+      location = validated.location;
+    } catch (err) {
+      console.error("Gemini failed:", err.message);
+    }
+
+    // 🔹 STEP 4: Update Gemini results
+    await db.query(
+      `UPDATE reports
+       SET category = ?, severity = ?, location = ?
+       WHERE case_id = ?`,
+      [category, severity, location, caseId]
+    );
+
+    // 🔹 Final success response
     res.json({
       message: "Report submitted successfully",
       case_id: caseId,
     });
+
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
