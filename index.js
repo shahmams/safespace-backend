@@ -158,6 +158,8 @@ Complaint:
   if (!match) throw new Error("Invalid Gemini response");
 
   return JSON.parse(match[0]);
+  console.log("Gemini raw response:", responseText);
+
 }
 
 // -------------------------------
