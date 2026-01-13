@@ -106,17 +106,26 @@ function classifySpam(text) {
 // -------------------------------
 // USER REPORT SUBMISSION
 // -------------------------------
-const spamStatus = classifySpam(report_text);
+app.post("/report", async (req, res) => {
+  const { report_text, support_requested } = req.body;
 
-if (spamStatus === "spam") {
-  return res.status(400).json({
-    message: "Spam detected. Report rejected.",
-  });
-}
+  if (!report_text || report_text.trim() === "") {
+    return res.status(400).json({
+      message: "Report text is required",
+    });
+  }
 
+  // 🔹 Spam detection FIRST
+  const spamStatus = classifySpam(report_text);
 
-  // Generate case ID
-  const caseId = 'C-' + Math.floor(100000 + Math.random() * 900000);
+  if (spamStatus === "spam") {
+    return res.status(400).json({
+      message: "Spam detected. Report rejected.",
+    });
+  }
+
+  // 🔹 Generate case ID
+  const caseId = "C-" + Math.floor(100000 + Math.random() * 900000);
 
   try {
     await db.query(
@@ -127,18 +136,19 @@ if (spamStatus === "spam") {
         caseId,
         report_text,
         support_requested || false,
-        support_requested ? 'PENDING' : 'NOT_REQUESTED',
+        support_requested ? "PENDING" : "NOT_REQUESTED",
       ]
     );
 
     res.json({
-      message: 'Report submitted successfully',
+      message: "Report submitted successfully",
       case_id: caseId,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // -------------------------------
 // ROOT ROUTE
