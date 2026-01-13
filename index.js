@@ -1,15 +1,17 @@
 // -------------------------------
 // IMPORTS
 // -------------------------------
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const db = require("./db");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+
+// -------------------------------
+// GEMINI SETUP
+// -------------------------------
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // -------------------------------
 // APP SETUP
@@ -84,12 +86,15 @@ app.get("/db-test", async (req, res) => {
   }
 });
 
+// -------------------------------
+// SPAM DETECTION
+// -------------------------------
 function classifySpam(text) {
   const lower = text.toLowerCase().trim();
 
   const spamKeywords = [
     "win", "free", "click", "subscribe",
-    "offer", "http", "www", "buy now"
+    "offer", "http", "www", "buy now",
   ];
 
   for (const word of spamKeywords) {
@@ -104,6 +109,97 @@ function classifySpam(text) {
 }
 
 // -------------------------------
+// GEMINI ANALYSIS
+// -------------------------------
+async function analyzeWithGemini(text) {
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+  const prompt = `
+You are a campus safety analysis system.
+
+Analyze the complaint and respond ONLY in valid JSON.
+
+Allowed categories:
+- Abuse and Harassment
+- Mental Stress
+- Emergency
+- Ragging and Bullying
+- College Safety
+- Out of Scope
+
+Allowed severity:
+- LOW
+- MEDIUM
+- HIGH
+- CRITICAL
+- IGNORED
+
+Rules:
+- Short emotional distress is NOT Out of Scope
+- Immediate danger must be CRITICAL
+- Do not invent locations
+- If location is unclear, return "Unknown"
+
+Return JSON in this EXACT format:
+{
+  "category": "",
+  "severity": "",
+  "location": ""
+}
+
+Complaint:
+"""${text}"""
+`;
+
+  const result = await model.generateContent(prompt);
+  const responseText = result.response.text();
+
+  const match = responseText.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("Invalid Gemini response");
+
+  return JSON.parse(match[0]);
+}
+
+// -------------------------------
+// GEMINI OUTPUT VALIDATION
+// -------------------------------
+function validateGeminiOutput(result) {
+  const allowedCategories = [
+    "Abuse and Harassment",
+    "Mental Stress",
+    "Emergency",
+    "Ragging and Bullying",
+    "College Safety",
+    "Out of Scope",
+  ];
+
+  const allowedSeverity = [
+    "LOW", "MEDIUM", "HIGH", "CRITICAL", "IGNORED",
+  ];
+
+  if (!allowedCategories.includes(result.category)) {
+    result.category = "Out of Scope";
+  }
+
+  if (!allowedSeverity.includes(result.severity)) {
+    result.severity = "LOW";
+  }
+
+  if (typeof result.location !== "string") {
+    result.location = "Unknown";
+  }
+
+  if (
+    result.category === "Emergency" &&
+    ["LOW", "MEDIUM"].includes(result.severity)
+  ) {
+    result.severity = "HIGH";
+  }
+
+  return result;
+}
+
+// -------------------------------
 // USER REPORT SUBMISSION
 // -------------------------------
 app.post("/report", async (req, res) => {
@@ -115,13 +211,28 @@ app.post("/report", async (req, res) => {
     });
   }
 
-  // 🔹 Spam detection FIRST
+  // 🔹 Spam detection
   const spamStatus = classifySpam(report_text);
-
   if (spamStatus === "spam") {
     return res.status(400).json({
       message: "Spam detected. Report rejected.",
     });
+  }
+
+  // 🔹 Gemini analysis (safe)
+  let category = "Unknown";
+  let severity = "LOW";
+  let location = "Unknown";
+
+  try {
+    const geminiResult = await analyzeWithGemini(report_text);
+    const validated = validateGeminiOutput(geminiResult);
+
+    category = validated.category;
+    severity = validated.severity;
+    location = validated.location;
+  } catch (err) {
+    console.error("Gemini failed:", err.message);
   }
 
   // 🔹 Generate case ID
@@ -130,11 +241,15 @@ app.post("/report", async (req, res) => {
   try {
     await db.query(
       `INSERT INTO reports 
-       (case_id, report_text, support_requested, support_status) 
-       VALUES (?, ?, ?, ?)`,
+       (case_id, report_text, category, severity, location,
+        support_requested, support_status) 
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         caseId,
         report_text,
+        category,
+        severity,
+        location,
         support_requested || false,
         support_requested ? "PENDING" : "NOT_REQUESTED",
       ]
@@ -149,7 +264,6 @@ app.post("/report", async (req, res) => {
   }
 });
 
-
 // -------------------------------
 // ROOT ROUTE
 // -------------------------------
@@ -158,7 +272,7 @@ app.get("/", (req, res) => {
 });
 
 // -------------------------------
-// START SERVER (MUST BE LAST)
+// START SERVER
 // -------------------------------
 const PORT = process.env.PORT || 3000;
 
