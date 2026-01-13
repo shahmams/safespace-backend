@@ -332,31 +332,64 @@ app.post("/admin/report/:caseId/close", async (req, res) => {
 });
 
 // -------------------------------
-// ADMIN - MARK REPORT AS NOT SPAM
+// -------------------------------
+// ADMIN - MARK REPORT AS NOT SPAM (AUTO CLASSIFY)
 // -------------------------------
 app.post("/admin/report/:caseId/mark-clean", async (req, res) => {
   const { caseId } = req.params;
 
   try {
-    const [result] = await db.query(
-      `UPDATE reports
-       SET is_spam = false,
-           category = NULL,
-           severity = 'LOW'
+    // 1️⃣ Get the report text
+    const [rows] = await db.query(
+      `SELECT report_text
+       FROM reports
        WHERE case_id = ?`,
       [caseId]
     );
 
-    if (result.affectedRows === 0) {
+    if (rows.length === 0) {
       return res.status(404).json({
         message: "Report not found",
       });
     }
 
+    const reportText = rows[0].report_text;
+
+    // 2️⃣ Run Gemini classification
+    let category = "Out of Scope";
+    let severity = "LOW";
+    let location = "Unknown";
+
+    try {
+      const geminiResult = await analyzeWithGemini(reportText);
+      const validated = validateGeminiOutput(geminiResult);
+
+      category = validated.category;
+      severity = validated.severity;
+      location = validated.location;
+    } catch (err) {
+      console.error("Gemini failed during mark-clean:", err.message);
+    }
+
+    // 3️⃣ Update report as clean + classified
+    await db.query(
+      `UPDATE reports
+       SET is_spam = false,
+           category = ?,
+           severity = ?,
+           location = ?
+       WHERE case_id = ?`,
+      [category, severity, location, caseId]
+    );
+
     res.json({
-      message: "Report marked as not spam",
+      message: "Report marked as not spam and classified",
       case_id: caseId,
+      category,
+      severity,
+      location,
     });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
