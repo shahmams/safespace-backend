@@ -79,6 +79,35 @@ app.get("/db-test", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// USER REPORT SUBMISSION
+// -------------------------------
+app.post('/report', async (req, res) => {
+  const { report_text, support_requested } = req.body;
+
+  if (!report_text || report_text.trim() === '') {
+    return res.status(400).json({ message: 'Report text is required' });
+  }
+
+  // Generate simple reference ID
+  const reportId = 'R-' + Math.floor(100000 + Math.random() * 900000);
+
+  try {
+    await db.query(
+      `INSERT INTO reports 
+       (report_id, report_text, support_requested) 
+       VALUES (?, ?, ?)`,
+      [reportId, report_text, support_requested || false]
+    );
+
+    res.json({
+      message: 'Report submitted successfully',
+      report_id: reportId,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // -------------------------------
 // ROOT ROUTE
