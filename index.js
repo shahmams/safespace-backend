@@ -211,11 +211,9 @@ app.post("/report", async (req, res) => {
     });
   }
 
-  // 🔹 Generate case ID FIRST (always)
   const caseId = "C-" + Math.floor(100000 + Math.random() * 900000);
 
   try {
-    // 🔹 STEP 1: Insert report immediately (guaranteed storage)
     await db.query(
       `INSERT INTO reports 
        (case_id, report_text, support_requested, support_status)
@@ -228,7 +226,6 @@ app.post("/report", async (req, res) => {
       ]
     );
 
-    // 🔹 STEP 2: Spam detection AFTER storing
     const spamStatus = classifySpam(report_text);
 
     if (spamStatus === "spam") {
@@ -245,7 +242,6 @@ app.post("/report", async (req, res) => {
       });
     }
 
-    // 🔹 STEP 3: Gemini analysis ONLY for non-spam
     let category = "Unknown";
     let severity = "LOW";
     let location = "Unknown";
@@ -261,7 +257,6 @@ app.post("/report", async (req, res) => {
       console.error("Gemini failed:", err.message);
     }
 
-    // 🔹 STEP 4: Update Gemini results
     await db.query(
       `UPDATE reports
        SET category = ?, severity = ?, location = ?
@@ -269,7 +264,6 @@ app.post("/report", async (req, res) => {
       [category, severity, location, caseId]
     );
 
-    // 🔹 Final success response
     res.json({
       message: "Report submitted successfully",
       case_id: caseId,
@@ -281,21 +275,6 @@ app.post("/report", async (req, res) => {
   }
 });
 
-// -------------------------------
-// ROOT ROUTE
-// -------------------------------
-app.get("/", (req, res) => {
-  res.send("SafeSpace backend running");
-});
-
-// -------------------------------
-// START SERVER
-// -------------------------------
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
 // -------------------------------
 // ADMIN - VIEW SPAM REPORTS
 // -------------------------------
@@ -320,4 +299,82 @@ app.get("/admin/reports/spam", async (req, res) => {
     console.error(err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// -------------------------------
+// ADMIN - CLOSE REPORT
+// -------------------------------
+app.post("/admin/report/:caseId/close", async (req, res) => {
+  const { caseId } = req.params;
+
+  try {
+    const [result] = await db.query(
+      `UPDATE reports
+       SET case_status = 'CLOSED'
+       WHERE case_id = ?`,
+      [caseId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        message: "Report not found",
+      });
+    }
+
+    res.json({
+      message: "Report closed successfully",
+      case_id: caseId,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------
+// ADMIN - MARK REPORT AS NOT SPAM
+// -------------------------------
+app.post("/admin/report/:caseId/mark-clean", async (req, res) => {
+  const { caseId } = req.params;
+
+  try {
+    const [result] = await db.query(
+      `UPDATE reports
+       SET is_spam = false,
+           category = NULL,
+           severity = 'LOW'
+       WHERE case_id = ?`,
+      [caseId]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        message: "Report not found",
+      });
+    }
+
+    res.json({
+      message: "Report marked as not spam",
+      case_id: caseId,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------
+// ROOT ROUTE
+// -------------------------------
+app.get("/", (req, res) => {
+  res.send("SafeSpace backend running");
+});
+
+// -------------------------------
+// START SERVER
+// -------------------------------
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
