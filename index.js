@@ -83,15 +83,37 @@ app.get("/db-test", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+function classifySpam(text) {
+  const lower = text.toLowerCase().trim();
+
+  const spamKeywords = [
+    "win", "free", "click", "subscribe",
+    "offer", "http", "www", "buy now"
+  ];
+
+  for (const word of spamKeywords) {
+    if (lower.includes(word)) return "spam";
+  }
+
+  if (/^[a-z]{4,}$/.test(lower)) return "spam";
+  if (lower.split(" ").length <= 2) return "potential_spam";
+  if (/(.)\1{4,}/.test(lower)) return "spam";
+
+  return "valid";
+}
+
 // -------------------------------
 // USER REPORT SUBMISSION
 // -------------------------------
-app.post('/report', async (req, res) => {
-  const { report_text, support_requested } = req.body;
+const spamStatus = classifySpam(report_text);
 
-  if (!report_text || report_text.trim() === '') {
-    return res.status(400).json({ message: 'Report text is required' });
-  }
+if (spamStatus === "spam") {
+  return res.status(400).json({
+    message: "Spam detected. Report rejected.",
+  });
+}
+
 
   // Generate case ID
   const caseId = 'C-' + Math.floor(100000 + Math.random() * 900000);
