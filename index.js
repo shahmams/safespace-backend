@@ -89,20 +89,25 @@ app.post('/report', async (req, res) => {
     return res.status(400).json({ message: 'Report text is required' });
   }
 
-  // Generate simple reference ID
-  const reportId = 'R-' + Math.floor(100000 + Math.random() * 900000);
+  // Generate case ID
+  const caseId = 'C-' + Math.floor(100000 + Math.random() * 900000);
 
   try {
     await db.query(
       `INSERT INTO reports 
-       (report_id, report_text, support_requested) 
-       VALUES (?, ?, ?)`,
-      [reportId, report_text, support_requested || false]
+       (case_id, report_text, support_requested, support_status) 
+       VALUES (?, ?, ?, ?)`,
+      [
+        caseId,
+        report_text,
+        support_requested || false,
+        support_requested ? 'PENDING' : 'NOT_REQUESTED',
+      ]
     );
 
     res.json({
       message: 'Report submitted successfully',
-      report_id: reportId,
+      case_id: caseId,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
