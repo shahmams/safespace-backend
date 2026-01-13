@@ -296,3 +296,28 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+// -------------------------------
+// ADMIN - VIEW SPAM REPORTS
+// -------------------------------
+app.get("/admin/reports/spam", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT 
+         case_id,
+         report_text,
+         case_status,
+         created_at
+       FROM reports
+       WHERE is_spam = true
+       ORDER BY created_at DESC`
+    );
+
+    res.json({
+      count: rows.length,
+      reports: rows,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
