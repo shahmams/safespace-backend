@@ -69,7 +69,7 @@ app.post("/admin/login", async (req, res) => {
 });
 
 // -------------------------------
-// DB TEST ROUTE (IMPORTANT)
+// DB TEST ROUTE
 // -------------------------------
 app.get("/db-test", async (req, res) => {
   try {
@@ -88,7 +88,7 @@ app.get("/", (req, res) => {
 });
 
 // -------------------------------
-// START SERVER (LAST LINE)
+// START SERVER (MUST BE LAST)
 // -------------------------------
 const PORT = process.env.PORT || 3000;
 
