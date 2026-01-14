@@ -376,6 +376,25 @@ app.post("/admin/report/:caseId/close", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// ADMIN - VIEW ACTIVE REPORTS
+// -------------------------------
+app.get("/admin/reports/active", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT case_id, category, severity, created_at
+       FROM reports
+       WHERE case_status = 'ACTIVE' AND is_spam = false
+       ORDER BY created_at DESC`
+    );
+
+    res.json({
+      reports: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // -------------------------------
 // -------------------------------
