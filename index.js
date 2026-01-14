@@ -395,6 +395,23 @@ app.get("/admin/reports/active", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// ADMIN - VIEW CLOSED (PAST) REPORTS
+// -------------------------------
+app.get("/admin/reports/past", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT case_id, category, severity, created_at
+       FROM reports
+       WHERE case_status = 'CLOSED'
+       ORDER BY created_at DESC`
+    );
+
+    res.json({ reports: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // -------------------------------
 // -------------------------------
