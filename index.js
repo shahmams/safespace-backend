@@ -1,4 +1,11 @@
 // -------------------------------
+// ANONYMOUS ID GENERATOR
+// -------------------------------
+function generateAnonId() {
+  return "U-" + Math.random().toString(36).substring(2, 10);
+}
+
+// -------------------------------
 // IMPORTS
 // -------------------------------
 const express = require("express");
@@ -72,6 +79,13 @@ app.post("/admin/login", async (req, res) => {
     message: "Login successful",
     token,
   });
+});
+// -------------------------------
+// GET ANONYMOUS USER ID
+// -------------------------------
+app.get("/anon-id", (req, res) => {
+  const anonId = generateAnonId();
+  res.json({ anon_id: anonId });
 });
 
 // -------------------------------
@@ -202,9 +216,16 @@ function validateGeminiOutput(result) {
 // -------------------------------
 // USER REPORT SUBMISSION
 // -------------------------------
-app.post("/report", async (req, res) => {
-  const { report_text, support_requested } = req.body;
 
+
+app.post("/report", async (req, res) => {
+  const { report_text, support_requested, anon_id } = req.body;
+
+  if (!anon_id) {
+  return res.status(400).json({
+    message: "Anonymous ID missing",
+  });
+}
   if (!report_text || report_text.trim() === "") {
     return res.status(400).json({
       message: "Report text is required",
@@ -216,14 +237,17 @@ app.post("/report", async (req, res) => {
   try {
     await db.query(
       `INSERT INTO reports 
-       (case_id, report_text, support_requested, support_status)
-       VALUES (?, ?, ?, ?)`,
+(case_id, anon_id, report_text, support_requested, support_status)
+VALUES (?, ?, ?, ?, ?)
+`,
       [
-        caseId,
-        report_text,
-        support_requested || false,
-        support_requested ? "PENDING" : "NOT_REQUESTED",
-      ]
+  caseId,
+  anon_id,
+  report_text,
+  support_requested || false,
+  support_requested ? "PENDING" : "NOT_REQUESTED",
+]
+
     );
 
     const spamStatus = classifySpam(report_text);
@@ -271,6 +295,28 @@ app.post("/report", async (req, res) => {
 
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+// -------------------------------
+// GET REPORTS BY ANONYMOUS ID
+// -------------------------------
+app.get("/reports/by-anon/:anonId", async (req, res) => {
+  const { anonId } = req.params;
+
+  try {
+    const [rows] = await db.query(
+      `SELECT case_id, case_status, created_at
+       FROM reports
+       WHERE anon_id = ?
+       ORDER BY created_at DESC`,
+      [anonId]
+    );
+
+    res.json({
+      reports: rows,
+    });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
