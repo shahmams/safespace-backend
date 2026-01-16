@@ -344,7 +344,7 @@ app.get("/reports/by-anon/:anonId", async (req, res) => {
 
   try {
     const [rows] = await db.query(
-      `SELECT case_id, case_status, created_at
+      `SELECT case_id, case_status, support_status,created_at
        FROM reports
        WHERE anon_id = ?
        ORDER BY created_at DESC`,
