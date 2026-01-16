@@ -88,6 +88,37 @@ app.post("/admin/login", async (req, res) => {
   });
 });
 // -------------------------------
+// COUNSELLOR LOGIN ROUTE
+// -------------------------------
+app.post("/counsellor/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  if (email !== counsellorUser.email) {
+    return res.status(401).json({ message: "Invalid credentials" });
+  }
+
+  const passwordMatch = await bcrypt.compare(
+    password,
+    counsellorUser.passwordHash
+  );
+
+  if (!passwordMatch) {
+    return res.status(401).json({ message: "Invalid credentials" });
+  }
+
+  const token = jwt.sign(
+    { role: "counsellor" },
+    "SECRET_KEY",
+    { expiresIn: "1h" }
+  );
+
+  res.json({
+    message: "Login successful",
+    token,
+  });
+});
+
+// -------------------------------
 // GET ANONYMOUS USER ID
 // -------------------------------
 app.get("/anon-id", (req, res) => {
