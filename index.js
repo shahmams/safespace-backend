@@ -515,6 +515,104 @@ app.post("/admin/report/:caseId/mark-clean", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// ADMIN - GET SINGLE REPORT DETAILS
+// -------------------------------
+app.get("/admin/report/:caseId", async (req, res) => {
+  const { caseId } = req.params;
+
+  try {
+    const [rows] = await db.query(
+      `SELECT * FROM reports WHERE case_id = ?`,
+      [caseId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Report not found" });
+    }
+
+    res.json({ report: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+// -------------------------------
+// ADMIN - SUGGEST COUNSELLING
+// -------------------------------
+app.post("/admin/report/:caseId/suggest-support", async (req, res) => {
+  const { caseId } = req.params;
+
+  try {
+    await db.query(
+      `UPDATE reports
+       SET support_status = 'ADMIN_SUGGESTED'
+       WHERE case_id = ?`,
+      [caseId]
+    );
+
+    res.json({ message: "Counselling suggested to user" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+// -------------------------------
+// USER - ACCEPT COUNSELLING SUGGESTION
+// -------------------------------
+app.post("/report/:caseId/accept-support", async (req, res) => {
+  const { caseId } = req.params;
+
+  try {
+    await db.query(
+      `UPDATE reports
+       SET support_requested = 1,
+           support_status = 'PENDING'
+       WHERE case_id = ?`,
+      [caseId]
+    );
+
+    res.json({ message: "User accepted counselling suggestion" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+// -------------------------------
+// ADMIN - APPROVE COUNSELLING
+// -------------------------------
+app.post("/admin/report/:caseId/approve-support", async (req, res) => {
+  const { caseId } = req.params;
+
+  try {
+    await db.query(
+      `UPDATE reports
+       SET support_status = 'APPROVED'
+       WHERE case_id = ?`,
+      [caseId]
+    );
+
+    res.json({ message: "Counselling approved" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+// -------------------------------
+// ADMIN - REJECT COUNSELLING
+// -------------------------------
+app.post("/admin/report/:caseId/reject-support", async (req, res) => {
+  const { caseId } = req.params;
+
+  try {
+    await db.query(
+      `UPDATE reports
+       SET support_status = 'REJECTED'
+       WHERE case_id = ?`,
+      [caseId]
+    );
+
+    res.json({ message: "Counselling rejected" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // -------------------------------
 // ROOT ROUTE
