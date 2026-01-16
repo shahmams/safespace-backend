@@ -34,6 +34,13 @@ const adminUser = {
   email: "admin@safespace.com",
   passwordHash: bcrypt.hashSync("admin123", 10),
 };
+// -------------------------------
+// TEMP COUNSELLOR (FOR LEARNING)
+// -------------------------------
+const counsellorUser = {
+  email: "counsellor@safespace.com",
+  passwordHash: bcrypt.hashSync("counsellor123", 10),
+};
 
 // -------------------------------
 // TEST LOGIN ROUTE
