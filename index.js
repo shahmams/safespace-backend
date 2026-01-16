@@ -618,6 +618,67 @@ app.post("/admin/report/:caseId/reject-support", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// COUNSELLOR - VIEW APPROVED / IN-PROGRESS REPORTS
+// -------------------------------
+app.get("/counsellor/reports", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT 
+         case_id,
+         category,
+         severity,
+         created_at,
+         support_status
+       FROM reports
+       WHERE support_status IN ('APPROVED', 'IN_PROGRESS')
+       ORDER BY created_at ASC`
+    );
+
+    res.json({ reports: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+// -------------------------------
+// COUNSELLOR - START COUNSELLING
+// -------------------------------
+app.post("/counsellor/report/:caseId/start", async (req, res) => {
+  const { caseId } = req.params;
+
+  try {
+    await db.query(
+      `UPDATE reports
+       SET support_status = 'IN_PROGRESS'
+       WHERE case_id = ? AND support_status = 'APPROVED'`,
+      [caseId]
+    );
+
+    res.json({ message: "Counselling started" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+// -------------------------------
+// COUNSELLOR - CLOSE COUNSELLING
+// -------------------------------
+app.post("/counsellor/report/:caseId/close", async (req, res) => {
+  const { caseId } = req.params;
+
+  try {
+    await db.query(
+      `UPDATE reports
+       SET support_status = 'COUNSELLING_CLOSED'
+       WHERE case_id = ? AND support_status = 'IN_PROGRESS'`,
+      [caseId]
+    );
+
+    res.json({ message: "Counselling closed" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // -------------------------------
 // ROOT ROUTE
