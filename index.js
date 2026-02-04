@@ -602,6 +602,55 @@ app.post("/report/:caseId/message", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// ADMIN - SEND MESSAGE TO USER
+// -------------------------------
+app.post("/admin/report/:caseId/message", async (req, res) => {
+  const { caseId } = req.params;
+  const { message_text } = req.body;
+
+  if (!message_text || message_text.trim() === "") {
+    return res.status(400).json({
+      message: "Message text is required",
+    });
+  }
+
+  try {
+    // 1️⃣ Check case exists and is ACTIVE
+    const [rows] = await db.query(
+      `SELECT case_status FROM reports WHERE case_id = ?`,
+      [caseId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: "Case not found",
+      });
+    }
+
+    if (rows[0].case_status !== "ACTIVE") {
+      return res.status(403).json({
+        message: "Cannot send message. Case is closed.",
+      });
+    }
+
+    // 2️⃣ Insert admin message
+    await db.query(
+      `INSERT INTO case_messages (case_id, sender, message_text)
+       VALUES (?, 'admin', ?)`,
+      [caseId, message_text]
+    );
+
+    res.json({
+      message: "Admin message sent successfully",
+      case_id: caseId,
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // -------------------------------
 // ADMIN - SUGGEST COUNSELLING
