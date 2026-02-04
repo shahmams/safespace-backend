@@ -611,11 +611,13 @@ app.post("/report/:caseId/message", async (req, res) => {
 
 
     // 3️⃣ Insert message
+    // 3️⃣ Insert message
     await db.query(
-      `INSERT INTO case_messages (case_id, sender, message_text)
-       VALUES (?, 'user', ?)`,
-      [caseId, message_text]
-    );
+  `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
+   VALUES (?, 'user', 'ADMIN', ?)`,
+  [caseId, message_text]
+);
+
 
     console.log("✅ USER MESSAGE STORED");
 
@@ -640,7 +642,7 @@ app.get("/counsellor/messages/:caseId", async (req, res) => {
       `SELECT sender, message_text, created_at
        FROM case_messages
        WHERE case_id = ?
-       AND sender IN ('user', 'counsellor')
+       AND chat_type = 'COUNSELLOR'
        ORDER BY created_at ASC`,
       [caseId]
     );
@@ -677,7 +679,7 @@ app.get("/admin/messages/:caseId", async (req, res) => {
       `SELECT sender, message_text, created_at
        FROM case_messages
        WHERE case_id = ?
-       AND sender IN ('admin','user')
+       AND chat_type = 'ADMIN'
        ORDER BY created_at ASC`,
       [caseId]
     );
@@ -723,8 +725,8 @@ app.post("/admin/report/:caseId/message", async (req, res) => {
 
     // 2️⃣ Insert admin message
     await db.query(
-      `INSERT INTO case_messages (case_id, sender, message_text)
-       VALUES (?, 'admin', ?)`,
+      `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
+       VALUES (?, 'admin', 'ADMIN', ?)`,
       [caseId, message_text]
     );
 
@@ -861,8 +863,8 @@ app.post("/counsellor/report/:caseId/message", async (req, res) => {
 
     // 5️⃣ Insert counsellor message
     await db.query(
-      `INSERT INTO case_messages (case_id, sender, message_text)
-       VALUES (?, 'counsellor', ?)`,
+      `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
+       VALUES (?, 'counsellor','COUNSELLOR', ?)`,
       [caseId, message_text]
     );
 
@@ -911,8 +913,8 @@ app.post("/report/:caseId/counsellor-message", async (req, res) => {
   }
 
   await db.query(
-    `INSERT INTO case_messages (case_id, sender, message_text)
-     VALUES (?, 'user', ?)`,
+    `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
+     VALUES (?, 'user', 'COUNSELLOR', ?)`,
     [caseId, message_text]
   );
 
