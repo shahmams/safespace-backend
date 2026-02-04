@@ -651,6 +651,43 @@ app.get("/counsellor/messages/:caseId", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// ADMIN ↔ USER CHAT MESSAGES ONLY
+// -------------------------------
+app.get("/admin/messages/:caseId", async (req, res) => {
+  const { caseId } = req.params;
+  const { anon_id } = req.query;
+
+  try {
+    const [rows] = await db.query(
+      "SELECT anon_id FROM reports WHERE case_id = ?",
+      [caseId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Case not found" });
+    }
+
+    // User access check
+    if (anon_id && rows[0].anon_id !== anon_id) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    const [messages] = await db.query(
+      `SELECT sender, message_text, created_at
+       FROM case_messages
+       WHERE case_id = ?
+       AND sender IN ('admin','user')
+       ORDER BY created_at ASC`,
+      [caseId]
+    );
+
+    res.json({ messages });
+  } catch (err) {
+    console.error("ADMIN MESSAGE FETCH ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // -------------------------------
 // ADMIN - SEND MESSAGE TO USER
@@ -703,43 +740,7 @@ app.post("/admin/report/:caseId/message", async (req, res) => {
 });
 
 // -------------------------------
-// GET CASE MESSAGES (ADMIN + USER)
-// -------------------------------
-app.get("/messages/:caseId", async (req, res) => {
-  const { caseId } = req.params;
-  const { anon_id } = req.query;
 
-  try {
-    // Get report
-    const [rows] = await db.query(
-      "SELECT anon_id FROM reports WHERE case_id = ?",
-      [caseId]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ message: "Case not found" });
-    }
-
-    // If anon_id is provided → user access check
-    if (anon_id && rows[0].anon_id !== anon_id) {
-      return res.status(403).json({ message: "Unauthorized" });
-    }
-
-    // Fetch messages
-    const [messages] = await db.query(
-      `SELECT sender, message_text, created_at
-       FROM case_messages
-       WHERE case_id = ?
-       ORDER BY created_at ASC`,
-      [caseId]
-    );
-
-    res.json({ messages });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // -------------------------------
 // ADMIN - SUGGEST COUNSELLING
