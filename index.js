@@ -651,6 +651,53 @@ app.post("/admin/report/:caseId/message", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// GET MESSAGES FOR A CASE
+// (Admin or User)
+// -------------------------------
+app.get("/messages/:caseId", async (req, res) => {
+  const { caseId } = req.params;
+  const { anon_id } = req.query; // optional
+
+  try {
+    // 1️⃣ Check case exists
+    const [caseRows] = await db.query(
+      `SELECT anon_id FROM reports WHERE case_id = ?`,
+      [caseId]
+    );
+
+    if (caseRows.length === 0) {
+      return res.status(404).json({
+        message: "Case not found",
+      });
+    }
+
+    // 2️⃣ If anon_id is provided → user access
+    if (anon_id && caseRows[0].anon_id !== anon_id) {
+      return res.status(403).json({
+        message: "Unauthorized access to messages",
+      });
+    }
+
+    // 3️⃣ Fetch messages
+    const [messages] = await db.query(
+      `SELECT sender, message_text, created_at
+       FROM case_messages
+       WHERE case_id = ?
+       ORDER BY created_at ASC`,
+      [caseId]
+    );
+
+    res.json({
+      case_id: caseId,
+      messages,
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // -------------------------------
 // ADMIN - SUGGEST COUNSELLING
