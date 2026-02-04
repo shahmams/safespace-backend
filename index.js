@@ -629,6 +629,28 @@ app.post("/report/:caseId/message", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// GET COUNSELLOR CHAT MESSAGES ONLY
+// -------------------------------
+app.get("/counsellor/messages/:caseId", async (req, res) => {
+  const { caseId } = req.params;
+
+  try {
+    const [messages] = await db.query(
+      `SELECT sender, message_text, created_at
+       FROM case_messages
+       WHERE case_id = ?
+       AND sender IN ('user', 'counsellor')
+       ORDER BY created_at ASC`,
+      [caseId]
+    );
+
+    res.json({ messages });
+  } catch (err) {
+    console.error("COUNSELLOR MESSAGE FETCH ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // -------------------------------
 // ADMIN - SEND MESSAGE TO USER
