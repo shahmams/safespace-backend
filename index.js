@@ -392,28 +392,39 @@ app.post("/admin/report/:caseId/close", async (req, res) => {
   const { caseId } = req.params;
 
   try {
-    const [result] = await db.query(
+    const [rows] = await db.query(
+      `SELECT support_status FROM reports WHERE case_id = ?`,
+      [caseId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Report not found" });
+    }
+
+    if (rows[0].support_status === "IN_PROGRESS") {
+      return res.status(403).json({
+        message: "Admin cannot close case while counselling is in progress",
+      });
+    }
+
+    await db.query(
       `UPDATE reports
        SET case_status = 'CLOSED'
        WHERE case_id = ?`,
       [caseId]
     );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        message: "Report not found",
-      });
-    }
-
     res.json({
       message: "Report closed successfully",
       case_id: caseId,
     });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
+
 // -------------------------------
 // ADMIN - VIEW ACTIVE REPORTS
 // -------------------------------
@@ -548,6 +559,13 @@ app.post("/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
   const { anon_id, message_text } = req.body;
 
+  // 🔍 LOG 1: What Flutter is sending
+  console.log("USER MESSAGE REQUEST:", {
+    caseId,
+    anon_id,
+    message_text,
+  });
+
   if (!anon_id) {
     return res.status(400).json({
       message: "Anonymous ID is required",
@@ -561,11 +579,11 @@ app.post("/report/:caseId/message", async (req, res) => {
   }
 
   try {
-    // 1️⃣ Check case ownership + status
     const [rows] = await db.query(
-      `SELECT anon_id, case_status FROM reports WHERE case_id = ?`,
-      [caseId]
-    );
+  `SELECT anon_id, case_status, support_status 
+   FROM reports WHERE case_id = ?`,
+  [caseId]
+);
 
     if (rows.length === 0) {
       return res.status(404).json({
@@ -573,11 +591,17 @@ app.post("/report/:caseId/message", async (req, res) => {
       });
     }
 
-    if (rows[0].anon_id !== anon_id) {
-      return res.status(403).json({
-        message: "Unauthorized access to this case",
-      });
-    }
+    // 🔍 LOG 2: What DB has stored
+    console.log("DB REPORT anon_id:", rows[0].anon_id);
+
+    // 2️⃣ Ownership check
+    if (!rows[0].anon_id || rows[0].anon_id !== anon_id) {
+  console.log("ANON MISMATCH:", rows[0].anon_id, anon_id);
+  return res.status(403).json({
+    message: "Unauthorized access to this case",
+  });
+}
+
 
     if (rows[0].case_status !== "ACTIVE") {
       return res.status(403).json({
@@ -585,12 +609,15 @@ app.post("/report/:caseId/message", async (req, res) => {
       });
     }
 
-    // 2️⃣ Insert message
+
+    // 3️⃣ Insert message
     await db.query(
       `INSERT INTO case_messages (case_id, sender, message_text)
        VALUES (?, 'user', ?)`,
       [caseId, message_text]
     );
+
+    console.log("✅ USER MESSAGE STORED");
 
     res.json({
       message: "Message sent successfully",
@@ -598,10 +625,11 @@ app.post("/report/:caseId/message", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ USER MESSAGE ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
+
 // -------------------------------
 // ADMIN - SEND MESSAGE TO USER
 // -------------------------------
@@ -651,53 +679,7 @@ app.post("/admin/report/:caseId/message", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-// -------------------------------
-// GET MESSAGES FOR A CASE
-// (Admin or User)
-// -------------------------------
-app.get("/messages/:caseId", async (req, res) => {
-  const { caseId } = req.params;
-  const { anon_id } = req.query; // optional
 
-  try {
-    // 1️⃣ Check case exists
-    const [caseRows] = await db.query(
-      `SELECT anon_id FROM reports WHERE case_id = ?`,
-      [caseId]
-    );
-
-    if (caseRows.length === 0) {
-      return res.status(404).json({
-        message: "Case not found",
-      });
-    }
-
-    // 2️⃣ If anon_id is provided → user access
-    if (anon_id && caseRows[0].anon_id !== anon_id) {
-      return res.status(403).json({
-        message: "Unauthorized access to messages",
-      });
-    }
-
-    // 3️⃣ Fetch messages
-    const [messages] = await db.query(
-      `SELECT sender, message_text, created_at
-       FROM case_messages
-       WHERE case_id = ?
-       ORDER BY created_at ASC`,
-      [caseId]
-    );
-
-    res.json({
-      case_id: caseId,
-      messages,
-    });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
 // -------------------------------
 // GET CASE MESSAGES (ADMIN + USER)
 // -------------------------------
@@ -815,6 +797,107 @@ app.post("/admin/report/:caseId/reject-support", async (req, res) => {
   }
 });
 // -------------------------------
+// COUNSELLOR - SEND MESSAGE TO USER
+// -------------------------------
+app.post("/counsellor/report/:caseId/message", async (req, res) => {
+  const { caseId } = req.params;
+  const { message_text } = req.body;
+
+  // 1️⃣ Validate message
+  if (!message_text || message_text.trim() === "") {
+    return res.status(400).json({
+      message: "Message text is required",
+    });
+  }
+
+  try {
+    // 2️⃣ Fetch case status
+    const [rows] = await db.query(
+      `SELECT case_status, support_status
+       FROM reports
+       WHERE case_id = ?`,
+      [caseId]
+    );
+
+    // 3️⃣ Case must exist
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: "Case not found",
+      });
+    }
+
+    // 4️⃣ Counselling must be active
+    if (
+      rows[0].case_status !== "ACTIVE" ||
+      rows[0].support_status !== "IN_PROGRESS"
+    ) {
+      return res.status(403).json({
+        message: "Counselling is not active",
+      });
+    }
+
+    // 5️⃣ Insert counsellor message
+    await db.query(
+      `INSERT INTO case_messages (case_id, sender, message_text)
+       VALUES (?, 'counsellor', ?)`,
+      [caseId, message_text]
+    );
+
+    res.json({
+      message: "Counsellor message sent successfully",
+      case_id: caseId,
+    });
+
+  } catch (err) {
+    console.error("COUNSELLOR MESSAGE ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+// -------------------------------
+// USER → COUNSELLOR MESSAGE
+// -------------------------------
+app.post("/report/:caseId/counsellor-message", async (req, res) => {
+  const { caseId } = req.params;
+  const { anon_id, message_text } = req.body;
+
+  if (!anon_id || !message_text) {
+    return res.status(400).json({ message: "Invalid input" });
+  }
+
+  const [rows] = await db.query(
+    `SELECT anon_id, case_status, support_status
+     FROM reports WHERE case_id = ?`,
+    [caseId]
+  );
+
+  if (rows.length === 0) {
+    return res.status(404).json({ message: "Case not found" });
+  }
+
+  if (rows[0].anon_id !== anon_id) {
+    return res.status(403).json({ message: "Unauthorized" });
+  }
+
+  if (
+    rows[0].case_status !== "ACTIVE" ||
+    rows[0].support_status !== "IN_PROGRESS"
+  ) {
+    return res.status(403).json({
+      message: "Counselling is not active",
+    });
+  }
+
+  await db.query(
+    `INSERT INTO case_messages (case_id, sender, message_text)
+     VALUES (?, 'user', ?)`,
+    [caseId, message_text]
+  );
+
+  res.json({ message: "Message sent to counsellor" });
+});
+
+
+// -------------------------------
 // COUNSELLOR - VIEW APPROVED / IN-PROGRESS REPORTS
 // -------------------------------
 app.get("/counsellor/reports", async (req, res) => {
@@ -865,7 +948,8 @@ app.post("/counsellor/report/:caseId/close", async (req, res) => {
   try {
     await db.query(
       `UPDATE reports
-       SET support_status = 'COUNSELLING_CLOSED'
+       SET support_status = 'COUNSELLING_CLOSED',
+       case_status = 'CLOSED'
        WHERE case_id = ? AND support_status = 'IN_PROGRESS'`,
       [caseId]
     );
