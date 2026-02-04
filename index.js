@@ -542,6 +542,68 @@ app.get("/admin/report/:caseId", async (req, res) => {
   }
 });
 // -------------------------------
+// USER - SEND MESSAGE TO ADMIN
+// -------------------------------
+app.post("/report/:caseId/message", async (req, res) => {
+  const { caseId } = req.params;
+  const { anon_id, message_text } = req.body;
+
+  if (!anon_id) {
+    return res.status(400).json({
+      message: "Anonymous ID is required",
+    });
+  }
+
+  if (!message_text || message_text.trim() === "") {
+    return res.status(400).json({
+      message: "Message text is required",
+    });
+  }
+
+  try {
+    // 1️⃣ Check case ownership + status
+    const [rows] = await db.query(
+      `SELECT anon_id, case_status FROM reports WHERE case_id = ?`,
+      [caseId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: "Case not found",
+      });
+    }
+
+    if (rows[0].anon_id !== anon_id) {
+      return res.status(403).json({
+        message: "Unauthorized access to this case",
+      });
+    }
+
+    if (rows[0].case_status !== "ACTIVE") {
+      return res.status(403).json({
+        message: "Cannot send message. Case is closed.",
+      });
+    }
+
+    // 2️⃣ Insert message
+    await db.query(
+      `INSERT INTO case_messages (case_id, sender, message_text)
+       VALUES (?, 'user', ?)`,
+      [caseId, message_text]
+    );
+
+    res.json({
+      message: "Message sent successfully",
+      case_id: caseId,
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------
 // ADMIN - SUGGEST COUNSELLING
 // -------------------------------
 app.post("/admin/report/:caseId/suggest-support", async (req, res) => {
