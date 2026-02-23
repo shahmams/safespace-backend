@@ -1,12 +1,7 @@
-const mysql = require("mysql2");
+const mysql = require("mysql2/promise");
 
-const pool = mysql.createPool({
-  uri: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  },
-  waitForConnections: true,
-  connectionLimit: 10,
-});
+const pool = mysql.createPool(
+  process.env.DATABASE_URL + "?ssl=true"
+);
 
-module.exports = pool.promise();
+module.exports = pool;
