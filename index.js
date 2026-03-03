@@ -42,6 +42,18 @@ const counsellorUser = {
   passwordHash: bcrypt.hashSync("counsellor123", 10),
 };
 
+const { v2: cloudinary } = require("cloudinary");
+const multer = require("multer");
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+const upload = multer({
+  storage: multer.diskStorage({}),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
 // -------------------------------
 // TEST LOGIN ROUTE
 // -------------------------------
@@ -333,6 +345,65 @@ VALUES (?, ?, ?, ?, ?)
 
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+app.post("/report/:caseId/upload", upload.single("file"), async (req, res) => {
+  const { caseId } = req.params;
+
+  if (!req.file) {
+    return res.status(400).json({ message: "No file uploaded" });
+  }
+
+  try {
+    // Upload to Cloudinary
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      resource_type: "auto",
+      folder: "safespace_reports",
+    });
+
+    // Determine file type
+    let fileType = "other";
+    if (result.resource_type === "image") fileType = "image";
+    if (result.resource_type === "video") fileType = "video";
+    if (result.resource_type === "raw") fileType = "audio";
+
+    // Save in DB
+    await db.query(
+      `INSERT INTO report_attachments (case_id, file_url, file_type)
+       VALUES (?, ?, ?)`,
+      [caseId, result.secure_url, fileType]
+    );
+
+    res.json({
+      message: "File uploaded successfully",
+      url: result.secure_url,
+    });
+
+  } catch (err) {
+    console.error("Upload error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+// -------------------------------
+// ADMIN - GET REPORT ATTACHMENTS
+// -------------------------------
+app.get("/admin/report/:caseId/attachments", async (req, res) => {
+  const { caseId } = req.params;
+
+  try {
+    const [rows] = await db.query(
+      `SELECT file_url, file_type
+       FROM report_attachments
+       WHERE case_id = ?
+       ORDER BY created_at ASC`,
+      [caseId]
+    );
+
+    res.json({ attachments: rows });
+
+  } catch (err) {
+    console.error("Attachment fetch error:", err);
     res.status(500).json({ error: err.message });
   }
 });
