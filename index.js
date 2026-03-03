@@ -51,7 +51,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 const upload = multer({
-  storage: multer.diskStorage({}),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
 });
 // -------------------------------
@@ -357,9 +357,14 @@ app.post("/report/:caseId/upload", upload.single("file"), async (req, res) => {
 
   try {
     // Upload to Cloudinary
-    const result = await cloudinary.uploader.upload(req.file.path, {
-      resource_type: "auto",
-      folder: "safespace_reports",
+    const result = await new Promise((resolve, reject) => {
+      cloudinary.uploader.upload_stream(
+        { resource_type: "auto", folder: "safespace_reports" },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      ).end(req.file.buffer);
     });
 
     // Determine file type
