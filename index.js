@@ -344,6 +344,9 @@ VALUES (?, ?, ?, ?, ?)
   }
 });
 app.post("/report/:caseId/upload", upload.single("file"), async (req, res) => {
+  console.log("UPLOAD ROUTE HIT");
+  console.log("Case ID:", req.params.caseId);
+  console.log("File:", req.file);
   const { caseId } = req.params;
 
   if (!req.file) {
