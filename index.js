@@ -42,14 +42,9 @@ const counsellorUser = {
   passwordHash: bcrypt.hashSync("counsellor123", 10),
 };
 
-const { v2: cloudinary } = require("cloudinary");
 const multer = require("multer");
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -356,33 +351,21 @@ app.post("/report/:caseId/upload", upload.single("file"), async (req, res) => {
   }
 
   try {
-    // Upload to Cloudinary
-    const result = await new Promise((resolve, reject) => {
-      cloudinary.uploader.upload_stream(
-        { resource_type: "auto", folder: "safespace_reports" },
-        (error, result) => {
-          if (error) reject(error);
-          else resolve(result);
-        }
-      ).end(req.file.buffer);
-    });
 
-    // Determine file type
     let fileType = "other";
-    if (result.resource_type === "image") fileType = "image";
-    if (result.resource_type === "video") fileType = "video";
-    if (result.resource_type === "raw") fileType = "audio";
 
-    // Save in DB
+    if (req.file.mimetype.startsWith("image")) fileType = "image";
+    else if (req.file.mimetype.startsWith("video")) fileType = "video";
+    else if (req.file.mimetype.startsWith("audio")) fileType = "audio";
+
     await db.query(
-      `INSERT INTO report_attachments (case_id, file_url, file_type)
+      `INSERT INTO report_attachments (case_id, file_data, file_type)
        VALUES (?, ?, ?)`,
-      [caseId, result.secure_url, fileType]
+      [caseId, req.file.buffer, fileType]
     );
 
     res.json({
-      message: "File uploaded successfully",
-      url: result.secure_url,
+      message: "File stored in MySQL",
     });
 
   } catch (err) {
@@ -398,7 +381,7 @@ app.get("/admin/report/:caseId/attachments", async (req, res) => {
 
   try {
     const [rows] = await db.query(
-      `SELECT file_url, file_type
+      `SELECT id, file_type
        FROM report_attachments
        WHERE case_id = ?
        ORDER BY created_at ASC`,
@@ -411,6 +394,36 @@ app.get("/admin/report/:caseId/attachments", async (req, res) => {
     console.error("Attachment fetch error:", err);
     res.status(500).json({ error: err.message });
   }
+});
+app.get("/attachment/:id", async (req, res) => {
+
+  try {
+
+    const [rows] = await db.query(
+      `SELECT file_data, file_type
+       FROM report_attachments
+       WHERE id = ?`,
+      [req.params.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).send("File not found");
+    }
+
+    let mime = "application/octet-stream";
+
+    if (rows[0].file_type === "image") mime = "image/jpeg";
+    if (rows[0].file_type === "video") mime = "video/mp4";
+    if (rows[0].file_type === "audio") mime = "audio/mpeg";
+
+    res.set("Content-Type", mime);
+    res.send(rows[0].file_data);
+
+  } catch (err) {
+    console.error("Attachment serve error:", err);
+    res.status(500).json({ error: err.message });
+  }
+
 });
 // -------------------------------
 // GET REPORTS BY ANONYMOUS ID
