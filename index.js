@@ -714,9 +714,21 @@ app.post("/report/:caseId/upload", upload.single("file"), async (req, res) => {
 
     let fileType = "other";
 
-    if (req.file.mimetype.startsWith("image")) fileType = "image";
-    else if (req.file.mimetype.startsWith("video")) fileType = "video";
-    else if (req.file.mimetype.startsWith("audio")) fileType = "audio";
+    const mime = req.file.mimetype || "";
+const name = req.file.originalname.toLowerCase();
+
+if (mime.startsWith("image") || name.match(/\.(jpg|jpeg|png|gif)$/)) {
+  fileType = "image";
+}
+else if (mime.startsWith("video") || name.match(/\.(mp4|mov|webm)$/)) {
+  fileType = "video";
+}
+else if (
+  mime.startsWith("audio") ||
+  name.match(/\.(m4a|aac|mp3|wav|ogg)$/)
+) {
+  fileType = "audio";
+}
 
     await db.query(
       `INSERT INTO report_attachments (case_id, file_data, file_type)
