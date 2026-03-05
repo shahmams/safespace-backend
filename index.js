@@ -507,7 +507,39 @@ app.get("/admin/reports/past", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// ADMIN - HEATMAP REPORT DATA
+// -------------------------------
+app.get("/admin/heatmap-reports", async (req, res) => {
+  try {
 
+    const [rows] = await db.query(`
+      SELECT
+        case_id,
+        location,
+        category,
+        severity,
+        report_text,
+        case_status,
+        created_at
+      FROM reports
+      WHERE
+        is_spam = false
+        AND location != 'Unknown'
+        AND category != 'Out of Scope'
+        AND severity != 'IGNORED'
+    `);
+
+    res.json({
+      count: rows.length,
+      reports: rows
+    });
+
+  } catch (err) {
+    console.error("Heatmap fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 // -------------------------------
 // -------------------------------
 // ADMIN - MARK REPORT AS NOT SPAM (AUTO CLASSIFY)
