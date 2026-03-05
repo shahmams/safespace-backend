@@ -255,9 +255,37 @@ function validateGeminiOutput(result) {
 // USER REPORT SUBMISSION
 // -------------------------------
 
+// -------------------------------
+// CAMPUS LOCATION MAPPING
+// -------------------------------
+const locationMap = {
+  "canteen": "canteen",
+  "cafeteria": "canteen",
 
+  "union": "union_corner",
+  "union corner": "union_corner",
+
+  "library": "library",
+
+  "cs block": "cs_block",
+  "computer science": "cs_block",
+
+  "mech lab": "mech_block",
+  "mechanical": "mech_block",
+
+  "fab lab": "fab_lab",
+
+  "eee lab": "eee_block",
+  "electrical": "eee_block",
+
+  "ec lab": "ec_block",
+  "electronics": "ec_block",
+
+  "bus garage": "bus_garage",
+  "parking": "parking_space"
+};
 app.post("/report", async (req, res) => {
-  const { report_text, support_requested, anon_id } = req.body;
+  const { report_text, support_requested, anon_id, location_zone} = req.body;
 
   if (!anon_id) {
   return res.status(400).json({
@@ -307,14 +335,27 @@ VALUES (?, ?, ?, ?, ?)
     let category = "Unknown";
     let severity = "LOW";
     let location = "Unknown";
-
+    // 1️⃣ PRIORITY: map selection
+if (location_zone) {
+  location = location_zone;
+}
     try {
       const geminiResult = await analyzeWithGemini(report_text);
-      const validated = validateGeminiOutput(geminiResult);
+const validated = validateGeminiOutput(geminiResult);
 
-      category = validated.category;
-      severity = validated.severity;
-      location = validated.location;
+category = validated.category;
+severity = validated.severity;
+
+if (!location_zone) {
+  let extractedLocation = validated.location.toLowerCase();
+
+  for (const key in locationMap) {
+    if (extractedLocation.includes(key)) {
+      location = locationMap[key];
+      break;
+    }
+  }
+}
     } catch (err) {
       console.error("Gemini failed:", err.message);
     }
