@@ -792,8 +792,8 @@ app.post("/report/:caseId/message", async (req, res) => {
     // 3️⃣ Insert message
     // 3️⃣ Insert message
     await db.query(
-  `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
-   VALUES (?, 'user', 'ADMIN', ?)`,
+  `INSERT INTO case_messages (case_id, sender, chat_type, message_text,status)
+   VALUES (?, 'user', 'ADMIN', ?,'sent')`,
   [caseId, message_text]
 );
 
@@ -818,13 +818,37 @@ app.get("/counsellor/messages/:caseId", async (req, res) => {
 
   try {
     const [messages] = await db.query(
-      `SELECT sender, message_text, created_at
+      `SELECT sender, message_text, created_at,status
        FROM case_messages
        WHERE case_id = ?
        AND chat_type = 'COUNSELLOR'
        ORDER BY created_at ASC`,
       [caseId]
     );
+    await db.query(
+      `UPDATE case_messages
+       SET status = 'delivered'
+       WHERE case_id = ?
+       AND sender = 'user'
+       AND status = 'sent'`,
+      [caseId]
+    );
+    await db.query(
+      `UPDATE case_messages
+       SET status = 'delivered'
+       WHERE case_id = ?
+       AND sender = 'user'
+       AND status = 'sent'`,
+      [caseId]
+    );
+    await db.query(
+  `UPDATE case_messages
+   SET status = 'seen'
+   WHERE case_id = ?
+   AND sender = 'user'`,
+  [caseId]
+);
+
 
     res.json({ messages });
   } catch (err) {
@@ -855,11 +879,26 @@ app.get("/admin/messages/:caseId", async (req, res) => {
     }
 
     const [messages] = await db.query(
-      `SELECT sender, message_text, created_at
+      `SELECT sender, message_text, created_at,status
        FROM case_messages
        WHERE case_id = ?
        AND chat_type = 'ADMIN'
        ORDER BY created_at ASC`,
+      [caseId]
+    );
+    await db.query(
+      `UPDATE case_messages
+       SET status = 'delivered'
+       WHERE case_id = ?
+       AND sender = 'user'
+       AND status = 'sent'`,
+      [caseId]
+    );
+    await db.query(
+      `UPDATE case_messages
+       SET status = 'seen'
+       WHERE case_id = ?
+       AND sender = 'user'`,
       [caseId]
     );
 
@@ -1042,8 +1081,8 @@ app.post("/counsellor/report/:caseId/message", async (req, res) => {
 
     // 5️⃣ Insert counsellor message
     await db.query(
-      `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
-       VALUES (?, 'counsellor','COUNSELLOR', ?)`,
+      `INSERT INTO case_messages (case_id, sender, chat_type, message_text,status)
+       VALUES (?, 'counsellor','COUNSELLOR', ?,'sent')`,
       [caseId, message_text]
     );
 
@@ -1092,8 +1131,8 @@ app.post("/report/:caseId/counsellor-message", async (req, res) => {
   }
 
   await db.query(
-    `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
-     VALUES (?, 'user', 'COUNSELLOR', ?)`,
+    `INSERT INTO case_messages (case_id, sender, chat_type, message_text,status)
+     VALUES (?, 'user', 'COUNSELLOR', ?,'sent')`,
     [caseId, message_text]
   );
 
