@@ -475,6 +475,7 @@ app.get("/admin/reports/active", async (req, res) => {
       `SELECT 
          case_id,
          category,
+         report_text,
          severity,
          created_at,
          support_status,
