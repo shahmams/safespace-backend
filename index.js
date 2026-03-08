@@ -737,8 +737,7 @@ app.get("/admin/report/:caseId", async (req, res) => {
 // -------------------------------
 app.post("/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
-  const { anon_id, message_text } = req.body;
-
+  const { anon_id, message_text, audio_attachment_id } = req.body;
   // 🔍 LOG 1: What Flutter is sending
   console.log("USER MESSAGE REQUEST:", {
     caseId,
@@ -793,10 +792,11 @@ app.post("/report/:caseId/message", async (req, res) => {
     // 3️⃣ Insert message
     // 3️⃣ Insert message
     await db.query(
-  `INSERT INTO case_messages (case_id, sender, chat_type, message_text,status)
-   VALUES (?, 'user', 'ADMIN', ?,'sent')`,
-  [caseId, message_text]
-);
+      `INSERT INTO case_messages
+       (case_id, sender, chat_type, message_text, audio_attachment_id, status)
+       VALUES (?, 'user', 'ADMIN', ?, ?, 'sent')`,
+      [caseId, message_text || null, audio_attachment_id || null]
+    );
 
 
     console.log("✅ USER MESSAGE STORED");
@@ -819,7 +819,7 @@ app.get("/counsellor/messages/:caseId", async (req, res) => {
 
   try {
     const [messages] = await db.query(
-      `SELECT sender, message_text, created_at,status
+      `SELECT sender, message_text, audio_attachment_id, created_at, status
        FROM case_messages
        WHERE case_id = ?
        AND chat_type = 'COUNSELLOR'
@@ -880,7 +880,7 @@ app.get("/admin/messages/:caseId", async (req, res) => {
     }
 
     const [messages] = await db.query(
-      `SELECT sender, message_text, created_at,status
+      `SELECT sender, message_text, audio_attachment_id, created_at, status
        FROM case_messages
        WHERE case_id = ?
        AND chat_type = 'ADMIN'
@@ -915,8 +915,7 @@ app.get("/admin/messages/:caseId", async (req, res) => {
 // -------------------------------
 app.post("/admin/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
-  const { message_text } = req.body;
-
+  const { message_text, audio_attachment_id } = req.body;
   if (!message_text || message_text.trim() === "") {
     return res.status(400).json({
       message: "Message text is required",
@@ -948,7 +947,6 @@ app.post("/admin/report/:caseId/message", async (req, res) => {
        VALUES (?, 'admin', 'ADMIN', ?)`,
       [caseId, message_text]
     );
-
     res.json({
       message: "Admin message sent successfully",
       case_id: caseId,
@@ -1045,12 +1043,11 @@ app.post("/admin/report/:caseId/reject-support", async (req, res) => {
 // -------------------------------
 app.post("/counsellor/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
-  const { message_text } = req.body;
-
+  const { message_text, audio_attachment_id } = req.body;
   // 1️⃣ Validate message
-  if (!message_text || message_text.trim() === "") {
+  if (!message_text && !audio_attachment_id) {
     return res.status(400).json({
-      message: "Message text is required",
+      message: "Message text or audio required",
     });
   }
 
@@ -1082,8 +1079,8 @@ app.post("/counsellor/report/:caseId/message", async (req, res) => {
 
     // 5️⃣ Insert counsellor message
     await db.query(
-      `INSERT INTO case_messages (case_id, sender, chat_type, message_text,status)
-       VALUES (?, 'counsellor','COUNSELLOR', ?,'sent')`,
+      `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
+       VALUES (?, 'counsellor', 'COUNSELLOR', ?)`,
       [caseId, message_text]
     );
 
