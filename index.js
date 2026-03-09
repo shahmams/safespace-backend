@@ -1082,6 +1082,7 @@ app.get("/admin/emergency-alert", async (req, res) => {
       WHERE category = 'Emergency'
       AND severity = 'CRITICAL'
       AND case_status = 'ACTIVE'
+      AND emergency_seen = FALSE
       ORDER BY created_at DESC
       LIMIT 1
     `);
@@ -1099,6 +1100,32 @@ app.get("/admin/emergency-alert", async (req, res) => {
     console.error("Emergency alert check error:", err);
     res.status(500).json({ error: err.message });
   }
+});
+
+
+app.post("/admin/emergency-seen/:caseId", async (req, res) => {
+
+  const { caseId } = req.params;
+
+  try {
+
+    await db.query(
+      `UPDATE reports
+       SET emergency_seen = TRUE
+       WHERE case_id = ?`,
+      [caseId]
+    );
+
+    res.json({
+      message: "Emergency alert acknowledged"
+    });
+
+  } catch (err) {
+
+    res.status(500).json({ error: err.message });
+
+  }
+
 });
 // -------------------------------
 // ROOT ROUTE
