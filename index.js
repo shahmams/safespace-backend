@@ -14,6 +14,12 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const db = require("./db");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const multer = require("multer");
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+});
 
 // -------------------------------
 // GEMINI SETUP
@@ -410,7 +416,106 @@ app.get("/reports/by-anon/:anonId", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+app.post("/report/:caseId/upload", upload.single("file"), async (req, res) => {
 
+  console.log("UPLOAD ROUTE HIT");
+  console.log("Case ID:", req.params.caseId);
+  console.log("File:", req.file);
+
+  const { caseId } = req.params;
+
+  if (!req.file) {
+    return res.status(400).json({ message: "No file uploaded" });
+  }
+
+  try {
+
+    let fileType = "other";
+
+    const mime = req.file.mimetype || "";
+    const name = req.file.originalname.toLowerCase();
+
+    if (mime.startsWith("image") || name.match(/\.(jpg|jpeg|png|gif)$/)) {
+      fileType = "image";
+    }
+    else if (mime.startsWith("video") || name.match(/\.(mp4|mov|webm)$/)) {
+      fileType = "video";
+    }
+    else if (
+      mime.startsWith("audio") ||
+      name.match(/\.(m4a|aac|mp3|wav|ogg)$/)
+    ) {
+      fileType = "audio";
+    }
+
+    await db.query(
+      `INSERT INTO report_attachments (case_id, file_data, file_type)
+       VALUES (?, ?, ?)`,
+      [caseId, req.file.buffer, fileType]
+    );
+
+    res.json({
+      message: "File stored successfully"
+    });
+
+  } catch (err) {
+    console.error("Upload error:", err);
+    res.status(500).json({ error: err.message });
+  }
+
+});
+app.get("/admin/report/:caseId/attachments", async (req, res) => {
+
+  const { caseId } = req.params;
+
+  try {
+
+    const [rows] = await db.query(
+      `SELECT id, file_type
+       FROM report_attachments
+       WHERE case_id = ?
+       ORDER BY created_at ASC`,
+      [caseId]
+    );
+
+    res.json({ attachments: rows });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+
+});
+app.get("/attachment/:id", async (req, res) => {
+
+  try {
+
+    const [rows] = await db.query(
+      `SELECT file_data, file_type
+       FROM report_attachments
+       WHERE id = ?`,
+      [req.params.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).send("File not found");
+    }
+
+    let mime = "application/octet-stream";
+
+    if (rows[0].file_type === "image") mime = "image/jpeg";
+    if (rows[0].file_type === "video") mime = "video/mp4";
+    if (rows[0].file_type === "audio") mime = "audio/mp4";
+
+    res.set("Content-Type", mime);
+    res.send(rows[0].file_data);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+
+});
 // -------------------------------
 // ADMIN - VIEW SPAM REPORTS
 // -------------------------------
@@ -553,6 +658,39 @@ app.get("/admin/heatmap-reports", async (req, res) => {
   }
 });
 // -------------------------------
+// ADMIN - HEATMAP REPORT DATA
+// -------------------------------
+app.get("/admin/heatmap-reports", async (req, res) => {
+  try {
+
+    const [rows] = await db.query(`
+      SELECT
+        case_id,
+        location,
+        category,
+        severity,
+        report_text,
+        case_status,
+        created_at
+      FROM reports
+      WHERE
+        is_spam = false
+        AND location != 'Unknown'
+        AND category != 'Out of Scope'
+        AND severity != 'IGNORED'
+    `);
+
+    res.json({
+      count: rows.length,
+      reports: rows
+    });
+
+  } catch (err) {
+    console.error("Heatmap fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+// -------------------------------
 // -------------------------------
 // ADMIN - MARK REPORT AS NOT SPAM (AUTO CLASSIFY)
 // -------------------------------
@@ -643,7 +781,6 @@ app.get("/admin/report/:caseId", async (req, res) => {
 app.post("/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
   const { anon_id, message_text } = req.body;
-
   // 🔍 LOG 1: What Flutter is sending
   console.log("USER MESSAGE REQUEST:", {
     caseId,
@@ -657,9 +794,9 @@ app.post("/report/:caseId/message", async (req, res) => {
     });
   }
 
-  if (!message_text || message_text.trim() === "") {
+  if (!message_text) {
     return res.status(400).json({
-      message: "Message text is required",
+      message: "Message text or audio required",
     });
   }
 
@@ -698,10 +835,11 @@ app.post("/report/:caseId/message", async (req, res) => {
     // 3️⃣ Insert message
     // 3️⃣ Insert message
     await db.query(
-  `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
-   VALUES (?, 'user', 'ADMIN', ?)`,
-  [caseId, message_text]
-);
+      `INSERT INTO case_messages
+       (case_id, sender, chat_type, message_text, status)
+       VALUES (?, 'user', 'ADMIN', ?, 'sent')`,
+      [caseId, message_text]
+    );
 
 
     console.log("✅ USER MESSAGE STORED");
@@ -724,13 +862,31 @@ app.get("/counsellor/messages/:caseId", async (req, res) => {
 
   try {
     const [messages] = await db.query(
-      `SELECT sender, message_text, created_at
+      `SELECT id, sender, message_text, audio_data, created_at, status
+      
        FROM case_messages
        WHERE case_id = ?
        AND chat_type = 'COUNSELLOR'
        ORDER BY created_at ASC`,
       [caseId]
     );
+    
+    await db.query(
+      `UPDATE case_messages
+       SET status = 'delivered'
+       WHERE case_id = ?
+       AND sender = 'user'
+       AND status = 'sent'`,
+      [caseId]
+    );
+    await db.query(
+  `UPDATE case_messages
+   SET status = 'seen'
+   WHERE case_id = ?
+   AND sender = 'user'`,
+  [caseId]
+);
+
 
     res.json({ messages });
   } catch (err) {
@@ -761,11 +917,27 @@ app.get("/admin/messages/:caseId", async (req, res) => {
     }
 
     const [messages] = await db.query(
-      `SELECT sender, message_text, created_at
+      `SELECT id, sender, message_text, audio_data, created_at, status
+      
        FROM case_messages
        WHERE case_id = ?
        AND chat_type = 'ADMIN'
        ORDER BY created_at ASC`,
+      [caseId]
+    );
+    await db.query(
+      `UPDATE case_messages
+       SET status = 'delivered'
+       WHERE case_id = ?
+       AND sender = 'user'
+       AND status = 'sent'`,
+      [caseId]
+    );
+    await db.query(
+      `UPDATE case_messages
+       SET status = 'seen'
+       WHERE case_id = ?
+       AND sender = 'user'`,
       [caseId]
     );
 
@@ -782,7 +954,6 @@ app.get("/admin/messages/:caseId", async (req, res) => {
 app.post("/admin/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
   const { message_text } = req.body;
-
   if (!message_text || message_text.trim() === "") {
     return res.status(400).json({
       message: "Message text is required",
@@ -810,11 +981,11 @@ app.post("/admin/report/:caseId/message", async (req, res) => {
 
     // 2️⃣ Insert admin message
     await db.query(
-      `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
-       VALUES (?, 'admin', 'ADMIN', ?)`,
+      `INSERT INTO case_messages 
+       (case_id, sender, chat_type, message_text, status)
+       VALUES (?, 'admin', 'ADMIN', ?, 'sent')`,
       [caseId, message_text]
     );
-
     res.json({
       message: "Admin message sent successfully",
       case_id: caseId,
@@ -912,11 +1083,10 @@ app.post("/admin/report/:caseId/reject-support", async (req, res) => {
 app.post("/counsellor/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
   const { message_text } = req.body;
-
   // 1️⃣ Validate message
-  if (!message_text || message_text.trim() === "") {
+  if (!message_text) {
     return res.status(400).json({
-      message: "Message text is required",
+      message: "Message text or audio required",
     });
   }
 
@@ -948,8 +1118,9 @@ app.post("/counsellor/report/:caseId/message", async (req, res) => {
 
     // 5️⃣ Insert counsellor message
     await db.query(
-      `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
-       VALUES (?, 'counsellor','COUNSELLOR', ?)`,
+      `INSERT INTO case_messages 
+       (case_id, sender, chat_type, message_text, status)
+       VALUES (?, 'counsellor', 'COUNSELLOR', ?, 'sent')`,
       [caseId, message_text]
     );
 
@@ -998,16 +1169,62 @@ app.post("/report/:caseId/counsellor-message", async (req, res) => {
   }
 
   await db.query(
-    `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
-     VALUES (?, 'user', 'COUNSELLOR', ?)`,
+    `INSERT INTO case_messages (case_id, sender, chat_type, message_text,status)
+     VALUES (?, 'user', 'COUNSELLOR', ?,'sent')`,
     [caseId, message_text]
   );
 
   res.json({ message: "Message sent to counsellor" });
 });
 
-
 // -------------------------------
+// CHAT VOICE MESSAGE
+// -------------------------------
+app.post("/chat/:caseId/voice", upload.single("voice"), async (req, res) => {
+
+  const { caseId } = req.params;
+  const { sender, chat_type } = req.body;
+  if (!sender || !chat_type) {
+    return res.status(400).json({
+      message: "Missing sender or chat type"
+    });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({
+      message: "No voice file uploaded"
+    });
+  }
+
+  try {
+
+    await db.query(
+      `INSERT INTO case_messages
+       (case_id, sender, chat_type, message_text, audio_data, status)
+       VALUES (?, ?, ?, '', ?, 'sent')`,
+      [
+        caseId,
+        sender,
+        chat_type,
+        req.file.buffer
+      ]
+    );
+
+    res.json({
+      message: "Voice message sent"
+    });
+
+  } catch (err) {
+
+    console.error("VOICE MESSAGE ERROR:", err);
+
+    res.status(500).json({
+      error: err.message
+    });
+
+  }
+
+});//------------------------
 // COUNSELLOR - VIEW APPROVED / IN-PROGRESS REPORTS
 // -------------------------------
 app.get("/counsellor/reports", async (req, res) => {
@@ -1069,7 +1286,36 @@ app.post("/counsellor/report/:caseId/close", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// GET VOICE MESSAGE
+// -------------------------------
+app.get("/voice/:id", async (req, res) => {
 
+  try {
+
+    const [rows] = await db.query(
+      `SELECT audio_data FROM case_messages WHERE id = ?`,
+      [req.params.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).send("Voice not found");
+    }
+
+    res.set("Content-Type", "audio/*");
+        res.send(rows[0].audio_data);
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: err.message
+    });
+
+  }
+
+});
 // -------------------------------
 // ADMIN - CHECK CRITICAL EMERGENCY ALERT
 // -------------------------------
