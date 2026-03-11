@@ -372,10 +372,21 @@ if (!location_zone) {
        WHERE case_id = ?`,
       [category, severity, location, caseId]
     );
+// -------------------------------
+// EMERGENCY ALERT DETECTION
+// -------------------------------
+let emergencyAlert = false;
+
+if (category === "Emergency" && severity === "CRITICAL") {
+  emergencyAlert = true;
+
+  console.log("🚨 CRITICAL EMERGENCY DETECTED:", caseId);
+}
 
     res.json({
       message: "Report submitted successfully",
       case_id: caseId,
+      emergency_alert: emergencyAlert
     });
 
   } catch (err) {
@@ -613,7 +624,39 @@ app.get("/admin/reports/past", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// ADMIN - HEATMAP REPORT DATA
+// -------------------------------
+app.get("/admin/heatmap-reports", async (req, res) => {
+  try {
 
+    const [rows] = await db.query(`
+      SELECT
+        case_id,
+        location,
+        category,
+        severity,
+        report_text,
+        case_status,
+        created_at
+      FROM reports
+      WHERE
+        is_spam = false
+        AND location != 'Unknown'
+        AND category != 'Out of Scope'
+        AND severity != 'IGNORED'
+    `);
+
+    res.json({
+      count: rows.length,
+      reports: rows
+    });
+
+  } catch (err) {
+    console.error("Heatmap fetch error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 // -------------------------------
 // ADMIN - HEATMAP REPORT DATA
 // -------------------------------
@@ -1269,6 +1312,63 @@ app.get("/voice/:id", async (req, res) => {
     res.status(500).json({
       error: err.message
     });
+
+  }
+
+});
+// -------------------------------
+// ADMIN - CHECK CRITICAL EMERGENCY ALERT
+// -------------------------------
+app.get("/admin/emergency-alert", async (req, res) => {
+  try {
+
+    const [rows] = await db.query(`
+      SELECT case_id, location, created_at
+      FROM reports
+      WHERE category = 'Emergency'
+      AND severity = 'CRITICAL'
+      AND case_status = 'ACTIVE'
+      AND emergency_seen = FALSE
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+
+    if (rows.length === 0) {
+      return res.json({ alert: false });
+    }
+
+    res.json({
+      alert: true,
+      case: rows[0]
+    });
+
+  } catch (err) {
+    console.error("Emergency alert check error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.post("/admin/emergency-seen/:caseId", async (req, res) => {
+
+  const { caseId } = req.params;
+
+  try {
+
+    await db.query(
+      `UPDATE reports
+       SET emergency_seen = TRUE
+       WHERE case_id = ?`,
+      [caseId]
+    );
+
+    res.json({
+      message: "Emergency alert acknowledged"
+    });
+
+  } catch (err) {
+
+    res.status(500).json({ error: err.message });
 
   }
 
