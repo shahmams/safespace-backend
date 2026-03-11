@@ -737,7 +737,7 @@ app.get("/admin/report/:caseId", async (req, res) => {
 // -------------------------------
 app.post("/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
-  const { anon_id, message_text, audio_attachment_id } = req.body;
+  const { anon_id, message_text } = req.body;
   // 🔍 LOG 1: What Flutter is sending
   console.log("USER MESSAGE REQUEST:", {
     caseId,
@@ -751,9 +751,9 @@ app.post("/report/:caseId/message", async (req, res) => {
     });
   }
 
-  if (!message_text || message_text.trim() === "") {
+  if (!message_text) {
     return res.status(400).json({
-      message: "Message text is required",
+      message: "Message text or audio required",
     });
   }
 
@@ -793,9 +793,9 @@ app.post("/report/:caseId/message", async (req, res) => {
     // 3️⃣ Insert message
     await db.query(
       `INSERT INTO case_messages
-       (case_id, sender, chat_type, message_text, audio_attachment_id, status)
-       VALUES (?, 'user', 'ADMIN', ?, ?, 'sent')`,
-      [caseId, message_text || null, audio_attachment_id || null]
+       (case_id, sender, chat_type, message_text, status)
+       VALUES (?, 'user', 'ADMIN', ?, 'sent')`,
+      [caseId, message_text]
     );
 
 
@@ -819,21 +819,15 @@ app.get("/counsellor/messages/:caseId", async (req, res) => {
 
   try {
     const [messages] = await db.query(
-      `SELECT sender, message_text, audio_attachment_id, created_at, status
+      `SELECT id, sender, message_text, audio_data, created_at, status
+      
        FROM case_messages
        WHERE case_id = ?
        AND chat_type = 'COUNSELLOR'
        ORDER BY created_at ASC`,
       [caseId]
     );
-    await db.query(
-      `UPDATE case_messages
-       SET status = 'delivered'
-       WHERE case_id = ?
-       AND sender = 'user'
-       AND status = 'sent'`,
-      [caseId]
-    );
+    
     await db.query(
       `UPDATE case_messages
        SET status = 'delivered'
@@ -880,7 +874,8 @@ app.get("/admin/messages/:caseId", async (req, res) => {
     }
 
     const [messages] = await db.query(
-      `SELECT sender, message_text, audio_attachment_id, created_at, status
+      `SELECT id, sender, message_text, audio_data, created_at, status
+      
        FROM case_messages
        WHERE case_id = ?
        AND chat_type = 'ADMIN'
@@ -915,7 +910,7 @@ app.get("/admin/messages/:caseId", async (req, res) => {
 // -------------------------------
 app.post("/admin/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
-  const { message_text, audio_attachment_id } = req.body;
+  const { message_text } = req.body;
   if (!message_text || message_text.trim() === "") {
     return res.status(400).json({
       message: "Message text is required",
@@ -943,8 +938,9 @@ app.post("/admin/report/:caseId/message", async (req, res) => {
 
     // 2️⃣ Insert admin message
     await db.query(
-      `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
-       VALUES (?, 'admin', 'ADMIN', ?)`,
+      `INSERT INTO case_messages 
+       (case_id, sender, chat_type, message_text, status)
+       VALUES (?, 'admin', 'ADMIN', ?, 'sent')`,
       [caseId, message_text]
     );
     res.json({
@@ -1043,9 +1039,9 @@ app.post("/admin/report/:caseId/reject-support", async (req, res) => {
 // -------------------------------
 app.post("/counsellor/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
-  const { message_text, audio_attachment_id } = req.body;
+  const { message_text } = req.body;
   // 1️⃣ Validate message
-  if (!message_text && !audio_attachment_id) {
+  if (!message_text) {
     return res.status(400).json({
       message: "Message text or audio required",
     });
@@ -1079,8 +1075,9 @@ app.post("/counsellor/report/:caseId/message", async (req, res) => {
 
     // 5️⃣ Insert counsellor message
     await db.query(
-      `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
-       VALUES (?, 'counsellor', 'COUNSELLOR', ?)`,
+      `INSERT INTO case_messages 
+       (case_id, sender, chat_type, message_text, status)
+       VALUES (?, 'counsellor', 'COUNSELLOR', ?, 'sent')`,
       [caseId, message_text]
     );
 
@@ -1137,8 +1134,54 @@ app.post("/report/:caseId/counsellor-message", async (req, res) => {
   res.json({ message: "Message sent to counsellor" });
 });
 
-
 // -------------------------------
+// CHAT VOICE MESSAGE
+// -------------------------------
+app.post("/chat/:caseId/voice", upload.single("voice"), async (req, res) => {
+
+  const { caseId } = req.params;
+  const { sender, chat_type } = req.body;
+  if (!sender || !chat_type) {
+    return res.status(400).json({
+      message: "Missing sender or chat type"
+    });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({
+      message: "No voice file uploaded"
+    });
+  }
+
+  try {
+
+    await db.query(
+      `INSERT INTO case_messages
+       (case_id, sender, chat_type, audio_data, status)
+       VALUES (?, ?, ?, ?, 'sent')`,
+      [
+        caseId,
+        sender,
+        chat_type,
+        req.file.buffer
+      ]
+    );
+
+    res.json({
+      message: "Voice message sent"
+    });
+
+  } catch (err) {
+
+    console.error("VOICE MESSAGE ERROR:", err);
+
+    res.status(500).json({
+      error: err.message
+    });
+
+  }
+
+});//------------------------
 // COUNSELLOR - VIEW APPROVED / IN-PROGRESS REPORTS
 // -------------------------------
 app.get("/counsellor/reports", async (req, res) => {
@@ -1200,7 +1243,36 @@ app.post("/counsellor/report/:caseId/close", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// -------------------------------
+// GET VOICE MESSAGE
+// -------------------------------
+app.get("/voice/:id", async (req, res) => {
 
+  try {
+
+    const [rows] = await db.query(
+      `SELECT audio_data FROM case_messages WHERE id = ?`,
+      [req.params.id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).send("Voice not found");
+    }
+
+    res.set("Content-Type", "audio/*");
+        res.send(rows[0].audio_data);
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: err.message
+    });
+
+  }
+
+});
 // -------------------------------
 // ROOT ROUTE
 // -------------------------------
