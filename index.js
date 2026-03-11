@@ -1157,8 +1157,8 @@ app.post("/chat/:caseId/voice", upload.single("voice"), async (req, res) => {
 
     await db.query(
       `INSERT INTO case_messages
-       (case_id, sender, chat_type, audio_data, status)
-       VALUES (?, ?, ?, ?, 'sent')`,
+       (case_id, sender, chat_type, message_text, audio_data, status)
+       VALUES (?, ?, ?, '', ?, 'sent')`,
       [
         caseId,
         sender,
