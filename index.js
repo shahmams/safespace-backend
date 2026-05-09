@@ -14,12 +14,6 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const db = require("./db");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const multer = require("multer");
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
-});
 
 // -------------------------------
 // GEMINI SETUP
@@ -166,7 +160,11 @@ function classifySpam(text) {
   return "valid";
 }
 
+// -------------------------------
+// GEMINI ANALYSIS
+// -------------------------------
 async function analyzeWithGemini(text) {
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   const prompt = `
 You are a campus safety analysis system.
@@ -191,63 +189,29 @@ Allowed severity:
 Rules:
 - Short emotional distress is NOT Out of Scope
 - Immediate danger must be CRITICAL
-
+- Do not invent locations
+- If location is unclear, return "Unknown"
 
 Return JSON in this EXACT format:
 {
   "category": "",
-  "severity": ""
-  
+  "severity": "",
+  "location": ""
 }
 
 Complaint:
 """${text}"""
 `;
 
-  try {
+  const result = await model.generateContent(prompt);
+  const responseText = result.response.text();
 
-    let result;
+  const match = responseText.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("Invalid Gemini response");
 
-    try {
-
-      const model = genAI.getGenerativeModel({
-        model: "gemini-flash-latest"
-      });
-
-      result = await model.generateContent(prompt);
-
-    } catch (err) {
-
-      console.error("Gemini 2.5 failed:", err.message);
-
-      const fallbackModel = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash"
-      });
-
-      result = await fallbackModel.generateContent(prompt);
-    }
-
-    const responseText = result.response.text();
-
-    const match = responseText.match(/\{[\s\S]*\}/);
-
-    if (!match) {
-      throw new Error("Invalid Gemini response");
-    }
-
-    return JSON.parse(match[0]);
-
-  } catch (err) {
-
-    console.error("All Gemini models failed:", err.message);
-
-    return {
-      category: "Out of Scope",
-      severity: "LOW",
-      location: "Unknown"
-    };
-  }
+  return JSON.parse(match[0]);
 }
+
 // -------------------------------
 // GEMINI OUTPUT VALIDATION
 // -------------------------------
@@ -370,32 +334,38 @@ VALUES (?, ?, ?, ?, ?)
 
     let category = "Unknown";
     let severity = "LOW";
-    let location = location_zone || "Unknown";
+    let location = "Unknown";
     // 1️⃣ PRIORITY: map selection
 if (location_zone) {
   location = location_zone;
 }
+    try {
+      const geminiResult = await analyzeWithGemini(report_text);
+const validated = validateGeminiOutput(geminiResult);
 
-try {
+category = validated.category;
+severity = validated.severity;
 
-  const geminiResult = await analyzeWithGemini(report_text);
-  const validated = validateGeminiOutput(geminiResult);
+if (!location_zone) {
+  let extractedLocation = validated.location.toLowerCase();
 
-  category = validated.category;
-  severity = validated.severity;
-
-} catch (err) {
-
-  console.error("Gemini failed:", err.message);
-
+  for (const key in locationMap) {
+    if (extractedLocation.includes(key)) {
+      location = locationMap[key];
+      break;
+    }
+  }
 }
+    } catch (err) {
+      console.error("Gemini failed:", err.message);
+    }
 
-await db.query(
-  `UPDATE reports
-   SET category = ?, severity = ?, location = ?
-   WHERE case_id = ?`,
-  [category, severity, location, caseId]
-);
+    await db.query(
+      `UPDATE reports
+       SET category = ?, severity = ?, location = ?
+       WHERE case_id = ?`,
+      [category, severity, location, caseId]
+    );
 // -------------------------------
 // EMERGENCY ALERT DETECTION
 // -------------------------------
@@ -440,106 +410,7 @@ app.get("/reports/by-anon/:anonId", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-app.post("/report/:caseId/upload", upload.single("file"), async (req, res) => {
 
-  console.log("UPLOAD ROUTE HIT");
-  console.log("Case ID:", req.params.caseId);
-  console.log("File:", req.file);
-
-  const { caseId } = req.params;
-
-  if (!req.file) {
-    return res.status(400).json({ message: "No file uploaded" });
-  }
-
-  try {
-
-    let fileType = "other";
-
-    const mime = req.file.mimetype || "";
-    const name = req.file.originalname.toLowerCase();
-
-    if (mime.startsWith("image") || name.match(/\.(jpg|jpeg|png|gif)$/)) {
-      fileType = "image";
-    }
-    else if (mime.startsWith("video") || name.match(/\.(mp4|mov|webm)$/)) {
-      fileType = "video";
-    }
-    else if (
-      mime.startsWith("audio") ||
-      name.match(/\.(m4a|aac|mp3|wav|ogg)$/)
-    ) {
-      fileType = "audio";
-    }
-
-    await db.query(
-      `INSERT INTO report_attachments (case_id, file_data, file_type)
-       VALUES (?, ?, ?)`,
-      [caseId, req.file.buffer, fileType]
-    );
-
-    res.json({
-      message: "File stored successfully"
-    });
-
-  } catch (err) {
-    console.error("Upload error:", err);
-    res.status(500).json({ error: err.message });
-  }
-
-});
-app.get("/admin/report/:caseId/attachments", async (req, res) => {
-
-  const { caseId } = req.params;
-
-  try {
-
-    const [rows] = await db.query(
-      `SELECT id, file_type
-       FROM report_attachments
-       WHERE case_id = ?
-       ORDER BY created_at ASC`,
-      [caseId]
-    );
-
-    res.json({ attachments: rows });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-
-});
-app.get("/attachment/:id", async (req, res) => {
-
-  try {
-
-    const [rows] = await db.query(
-      `SELECT file_data, file_type
-       FROM report_attachments
-       WHERE id = ?`,
-      [req.params.id]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).send("File not found");
-    }
-
-    let mime = "application/octet-stream";
-
-    if (rows[0].file_type === "image") mime = "image/jpeg";
-    if (rows[0].file_type === "video") mime = "video/mp4";
-    if (rows[0].file_type === "audio") mime = "audio/mp4";
-
-    res.set("Content-Type", mime);
-    res.send(rows[0].file_data);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-
-});
 // -------------------------------
 // ADMIN - VIEW SPAM REPORTS
 // -------------------------------
@@ -682,39 +553,6 @@ app.get("/admin/heatmap-reports", async (req, res) => {
   }
 });
 // -------------------------------
-// ADMIN - HEATMAP REPORT DATA
-// -------------------------------
-app.get("/admin/heatmap-reports", async (req, res) => {
-  try {
-
-    const [rows] = await db.query(`
-      SELECT
-        case_id,
-        location,
-        category,
-        severity,
-        report_text,
-        case_status,
-        created_at
-      FROM reports
-      WHERE
-        is_spam = false
-        AND location != 'Unknown'
-        AND category != 'Out of Scope'
-        AND severity != 'IGNORED'
-    `);
-
-    res.json({
-      count: rows.length,
-      reports: rows
-    });
-
-  } catch (err) {
-    console.error("Heatmap fetch error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-// -------------------------------
 // -------------------------------
 // ADMIN - MARK REPORT AS NOT SPAM (AUTO CLASSIFY)
 // -------------------------------
@@ -805,6 +643,7 @@ app.get("/admin/report/:caseId", async (req, res) => {
 app.post("/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
   const { anon_id, message_text } = req.body;
+
   // 🔍 LOG 1: What Flutter is sending
   console.log("USER MESSAGE REQUEST:", {
     caseId,
@@ -818,9 +657,9 @@ app.post("/report/:caseId/message", async (req, res) => {
     });
   }
 
-  if (!message_text) {
+  if (!message_text || message_text.trim() === "") {
     return res.status(400).json({
-      message: "Message text or audio required",
+      message: "Message text is required",
     });
   }
 
@@ -859,11 +698,10 @@ app.post("/report/:caseId/message", async (req, res) => {
     // 3️⃣ Insert message
     // 3️⃣ Insert message
     await db.query(
-      `INSERT INTO case_messages
-       (case_id, sender, chat_type, message_text, status)
-       VALUES (?, 'user', 'ADMIN', ?, 'sent')`,
-      [caseId, message_text]
-    );
+  `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
+   VALUES (?, 'user', 'ADMIN', ?)`,
+  [caseId, message_text]
+);
 
 
     console.log("✅ USER MESSAGE STORED");
@@ -886,31 +724,13 @@ app.get("/counsellor/messages/:caseId", async (req, res) => {
 
   try {
     const [messages] = await db.query(
-      `SELECT id, sender, message_text, audio_data, created_at, status
-      
+      `SELECT sender, message_text, created_at
        FROM case_messages
        WHERE case_id = ?
        AND chat_type = 'COUNSELLOR'
        ORDER BY created_at ASC`,
       [caseId]
     );
-    
-    await db.query(
-      `UPDATE case_messages
-       SET status = 'delivered'
-       WHERE case_id = ?
-       AND sender = 'user'
-       AND status = 'sent'`,
-      [caseId]
-    );
-    await db.query(
-  `UPDATE case_messages
-   SET status = 'seen'
-   WHERE case_id = ?
-   AND sender = 'user'`,
-  [caseId]
-);
-
 
     res.json({ messages });
   } catch (err) {
@@ -941,27 +761,11 @@ app.get("/admin/messages/:caseId", async (req, res) => {
     }
 
     const [messages] = await db.query(
-      `SELECT id, sender, message_text, audio_data, created_at, status
-      
+      `SELECT sender, message_text, created_at
        FROM case_messages
        WHERE case_id = ?
        AND chat_type = 'ADMIN'
        ORDER BY created_at ASC`,
-      [caseId]
-    );
-    await db.query(
-      `UPDATE case_messages
-       SET status = 'delivered'
-       WHERE case_id = ?
-       AND sender = 'user'
-       AND status = 'sent'`,
-      [caseId]
-    );
-    await db.query(
-      `UPDATE case_messages
-       SET status = 'seen'
-       WHERE case_id = ?
-       AND sender = 'user'`,
       [caseId]
     );
 
@@ -978,6 +782,7 @@ app.get("/admin/messages/:caseId", async (req, res) => {
 app.post("/admin/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
   const { message_text } = req.body;
+
   if (!message_text || message_text.trim() === "") {
     return res.status(400).json({
       message: "Message text is required",
@@ -1005,11 +810,11 @@ app.post("/admin/report/:caseId/message", async (req, res) => {
 
     // 2️⃣ Insert admin message
     await db.query(
-      `INSERT INTO case_messages 
-       (case_id, sender, chat_type, message_text, status)
-       VALUES (?, 'admin', 'ADMIN', ?, 'sent')`,
+      `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
+       VALUES (?, 'admin', 'ADMIN', ?)`,
       [caseId, message_text]
     );
+
     res.json({
       message: "Admin message sent successfully",
       case_id: caseId,
@@ -1107,10 +912,11 @@ app.post("/admin/report/:caseId/reject-support", async (req, res) => {
 app.post("/counsellor/report/:caseId/message", async (req, res) => {
   const { caseId } = req.params;
   const { message_text } = req.body;
+
   // 1️⃣ Validate message
-  if (!message_text) {
+  if (!message_text || message_text.trim() === "") {
     return res.status(400).json({
-      message: "Message text or audio required",
+      message: "Message text is required",
     });
   }
 
@@ -1142,9 +948,8 @@ app.post("/counsellor/report/:caseId/message", async (req, res) => {
 
     // 5️⃣ Insert counsellor message
     await db.query(
-      `INSERT INTO case_messages 
-       (case_id, sender, chat_type, message_text, status)
-       VALUES (?, 'counsellor', 'COUNSELLOR', ?, 'sent')`,
+      `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
+       VALUES (?, 'counsellor','COUNSELLOR', ?)`,
       [caseId, message_text]
     );
 
@@ -1193,62 +998,16 @@ app.post("/report/:caseId/counsellor-message", async (req, res) => {
   }
 
   await db.query(
-    `INSERT INTO case_messages (case_id, sender, chat_type, message_text,status)
-     VALUES (?, 'user', 'COUNSELLOR', ?,'sent')`,
+    `INSERT INTO case_messages (case_id, sender, chat_type, message_text)
+     VALUES (?, 'user', 'COUNSELLOR', ?)`,
     [caseId, message_text]
   );
 
   res.json({ message: "Message sent to counsellor" });
 });
 
+
 // -------------------------------
-// CHAT VOICE MESSAGE
-// -------------------------------
-app.post("/chat/:caseId/voice", upload.single("voice"), async (req, res) => {
-
-  const { caseId } = req.params;
-  const { sender, chat_type } = req.body;
-  if (!sender || !chat_type) {
-    return res.status(400).json({
-      message: "Missing sender or chat type"
-    });
-  }
-
-  if (!req.file) {
-    return res.status(400).json({
-      message: "No voice file uploaded"
-    });
-  }
-
-  try {
-
-    await db.query(
-      `INSERT INTO case_messages
-       (case_id, sender, chat_type, message_text, audio_data, status)
-       VALUES (?, ?, ?, '', ?, 'sent')`,
-      [
-        caseId,
-        sender,
-        chat_type,
-        req.file.buffer
-      ]
-    );
-
-    res.json({
-      message: "Voice message sent"
-    });
-
-  } catch (err) {
-
-    console.error("VOICE MESSAGE ERROR:", err);
-
-    res.status(500).json({
-      error: err.message
-    });
-
-  }
-
-});//------------------------
 // COUNSELLOR - VIEW APPROVED / IN-PROGRESS REPORTS
 // -------------------------------
 app.get("/counsellor/reports", async (req, res) => {
@@ -1310,36 +1069,7 @@ app.post("/counsellor/report/:caseId/close", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-// -------------------------------
-// GET VOICE MESSAGE
-// -------------------------------
-app.get("/voice/:id", async (req, res) => {
 
-  try {
-
-    const [rows] = await db.query(
-      `SELECT audio_data FROM case_messages WHERE id = ?`,
-      [req.params.id]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).send("Voice not found");
-    }
-
-    res.set("Content-Type", "audio/*");
-        res.send(rows[0].audio_data);
-
-  } catch (err) {
-
-    console.error(err);
-
-    res.status(500).json({
-      error: err.message
-    });
-
-  }
-
-});
 // -------------------------------
 // ADMIN - CHECK CRITICAL EMERGENCY ALERT
 // -------------------------------
