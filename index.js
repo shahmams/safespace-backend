@@ -166,11 +166,7 @@ function classifySpam(text) {
   return "valid";
 }
 
-// -------------------------------
-// GEMINI ANALYSIS
-// -------------------------------
 async function analyzeWithGemini(text) {
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   const prompt = `
 You are a campus safety analysis system.
@@ -209,15 +205,37 @@ Complaint:
 """${text}"""
 `;
 
-  const result = await model.generateContent(prompt);
+  let result;
+
+  try {
+
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash"
+    });
+
+    result = await model.generateContent(prompt);
+
+  } catch (err) {
+
+    console.log("2.5 failed, switching to 1.5");
+
+    const fallbackModel = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash"
+    });
+
+    result = await fallbackModel.generateContent(prompt);
+  }
+
   const responseText = result.response.text();
 
   const match = responseText.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("Invalid Gemini response");
+
+  if (!match) {
+    throw new Error("Invalid Gemini response");
+  }
 
   return JSON.parse(match[0]);
 }
-
 // -------------------------------
 // GEMINI OUTPUT VALIDATION
 // -------------------------------
