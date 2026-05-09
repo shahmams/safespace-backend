@@ -205,36 +205,49 @@ Complaint:
 """${text}"""
 `;
 
-  let result;
-
   try {
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash"
-    });
+    let result;
 
-    result = await model.generateContent(prompt);
+    try {
+
+      const model = genAI.getGenerativeModel({
+        model: "gemini-2.5-flash"
+      });
+
+      result = await model.generateContent(prompt);
+
+    } catch (err) {
+
+      console.error("Gemini 2.5 failed:", err.message);
+
+      const fallbackModel = genAI.getGenerativeModel({
+        model: "gemini-2.0-flash"
+      });
+
+      result = await fallbackModel.generateContent(prompt);
+    }
+
+    const responseText = result.response.text();
+
+    const match = responseText.match(/\{[\s\S]*\}/);
+
+    if (!match) {
+      throw new Error("Invalid Gemini response");
+    }
+
+    return JSON.parse(match[0]);
 
   } catch (err) {
 
-    console.log("2.5 failed, switching to 1.5");
+    console.error("All Gemini models failed:", err.message);
 
-    const fallbackModel = genAI.getGenerativeModel({
-  model: "gemini-1.5-flash-latest"
-});
-
-    result = await fallbackModel.generateContent(prompt);
+    return {
+      category: "Out of Scope",
+      severity: "LOW",
+      location: "Unknown"
+    };
   }
-
-  const responseText = result.response.text();
-
-  const match = responseText.match(/\{[\s\S]*\}/);
-
-  if (!match) {
-    throw new Error("Invalid Gemini response");
-  }
-
-  return JSON.parse(match[0]);
 }
 // -------------------------------
 // GEMINI OUTPUT VALIDATION
