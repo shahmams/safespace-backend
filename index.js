@@ -191,14 +191,13 @@ Allowed severity:
 Rules:
 - Short emotional distress is NOT Out of Scope
 - Immediate danger must be CRITICAL
-- Do not invent locations
-- If location is unclear, return "Unknown"
+
 
 Return JSON in this EXACT format:
 {
   "category": "",
-  "severity": "",
-  "location": ""
+  "severity": ""
+  
 }
 
 Complaint:
@@ -371,38 +370,32 @@ VALUES (?, ?, ?, ?, ?)
 
     let category = "Unknown";
     let severity = "LOW";
-    let location = "Unknown";
+    let location = location_zone || "Unknown";
     // 1️⃣ PRIORITY: map selection
 if (location_zone) {
   location = location_zone;
 }
-    try {
-      const geminiResult = await analyzeWithGemini(report_text);
-const validated = validateGeminiOutput(geminiResult);
 
-category = validated.category;
-severity = validated.severity;
+try {
 
-if (!location_zone) {
-  let extractedLocation = validated.location.toLowerCase();
+  const geminiResult = await analyzeWithGemini(report_text);
+  const validated = validateGeminiOutput(geminiResult);
 
-  for (const key in locationMap) {
-    if (extractedLocation.includes(key)) {
-      location = locationMap[key];
-      break;
-    }
-  }
+  category = validated.category;
+  severity = validated.severity;
+
+} catch (err) {
+
+  console.error("Gemini failed:", err.message);
+
 }
-    } catch (err) {
-      console.error("Gemini failed:", err.message);
-    }
 
-    await db.query(
-      `UPDATE reports
-       SET category = ?, severity = ?, location = ?
-       WHERE case_id = ?`,
-      [category, severity, location, caseId]
-    );
+await db.query(
+  `UPDATE reports
+   SET category = ?, severity = ?, location = ?
+   WHERE case_id = ?`,
+  [category, severity, location, caseId]
+);
 // -------------------------------
 // EMERGENCY ALERT DETECTION
 // -------------------------------
