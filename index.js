@@ -220,8 +220,8 @@ Complaint:
     console.log("2.5 failed, switching to 1.5");
 
     const fallbackModel = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash"
-    });
+  model: "gemini-1.5-flash-latest"
+});
 
     result = await fallbackModel.generateContent(prompt);
   }
